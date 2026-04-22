@@ -60,9 +60,11 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
   bool isDelaySubtitleDisplay = false;
   // 防止字幕结束回调在同一条字幕内重复触发（position stream 高频推送）
   bool _isSubtitleEndCalled = false;
-  // 每次导航递增；stale 的异步 seek/play 完成后检测到不匹配则放弃
+  // 每次导航递增；过期的异步 seek/play 完成后检测到不匹配则放弃
   int _playGeneration = 0;
   final _random = Random();
+  // 字幕延迟模式下默认 false（隐藏），字幕结束后由 onSubtitleEnd 置为 true（显示）；
+  // 非延迟模式下始终为 true。
   bool shouldShowSubtitle = false;
   int subtitlePauseDuration = 3;
   String? audioFilePath;
@@ -70,10 +72,14 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
   // 随机模式下的播放历史，用于"上一句"回溯；上限 1000 条防止内存增长
   List<int> playedSubtitlesIndices = [];
   Timer? _subtitleDelayTimer;
+  // 每次取消计时器时递增，计时器回调比对此值防止过期触发
   int _timerGeneration = 0;
   Timer? _saveSettingsDebounce;
   static const double _subtitleFontSize = 30.0;
+  // AudioService.init() 完成前为 false，dispose 时用于判断是否需要清理 handler
   bool _isInitialized = false;
+  // 防止用户在文件加载期间重复点击文件夹按钮导致并发竞争
+  bool _isPicking = false;
 
   @override
   void initState() {
@@ -99,6 +105,7 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     _audioHandler.onSkipToPrevious = () async {
       playPreviousSubtitle();
     };
+    // 将 widget 侧的回调注入 handler，使通知栏按钮能驱动字幕导航和计时器管理
     _audioHandler.cancelTimer = cancelSubtitleTimer;
     _audioHandler.updatePlayingStateCallback = _updatePlayingState;
     if (mounted) setState(() => _isInitialized = true);
@@ -123,6 +130,7 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
   }
 
   void checkSubtitleEnd(Duration position) {
+    if (!isPlaying) return;
     if (subtitles.isNotEmpty &&
         currentSubtitleIndex >= 0 &&
         currentSubtitleIndex < subtitles.length) {
@@ -223,8 +231,10 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
           await _audioHandler.seek(subtitles[safeIndex].startTime);
           if (mounted) {
             _audioHandler.updateDisplaySubtitle(isDelaySubtitleDisplay ? '' : subtitles[safeIndex].text);
+            // currentSubtitleIndex 在 setState 之前显式赋值，
+            // 使 saveSettings() 读取时不依赖闭包执行顺序
+            currentSubtitleIndex = safeIndex;
             setState(() {
-              currentSubtitleIndex = safeIndex;
               audioFilePath = lastAudioFilePath;
               subtitleFilePath = lastSubtitleFilePath;
               isFileLoaded = true;
@@ -233,7 +243,7 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
             if (safeIndex != rawIndex) saveSettings();
           }
         } catch (e) {
-          debugPrint('Failed to restore last session: $e');
+          debugPrint('恢复上次会话失败: $e');
           subtitles = [];
           if (mounted) {
             setState(() {
@@ -276,6 +286,16 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
   }
 
   Future<void> pickAudioFileAndFindSubtitle() async {
+    if (_isPicking) return;
+    _isPicking = true;
+    try {
+      await _pickAudioFileAndFindSubtitleImpl();
+    } finally {
+      _isPicking = false;
+    }
+  }
+
+  Future<void> _pickAudioFileAndFindSubtitleImpl() async {
     // 一次选择音频 + 字幕，allowMultiple: true 避免两次弹窗
     FilePickerResult? result = await FilePicker.pickFiles(
       type: FileType.custom,
@@ -319,6 +339,7 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     // 保存当前状态，用于取消时回滚
     final prevSubtitles = subtitles;
     final prevAudioPath = audioFilePath;
+    final prevSubtitlePath = subtitleFilePath;
     final prevPlayedIndices = List<int>.from(playedSubtitlesIndices);
 
     try {
@@ -351,6 +372,7 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
           if (proceed != true) {
             // 取消：恢复旧音频源，避免 handler 与 UI 状态不一致
             subtitles = prevSubtitles;
+            subtitleFilePath = prevSubtitlePath;
             playedSubtitlesIndices = prevPlayedIndices;
             if (prevAudioPath != null) {
               await setFileAudioSources(prevAudioPath);
@@ -405,6 +427,7 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
           shouldShowSubtitle = false;
         });
         await _audioHandler.stop();
+        saveSettings();
       }
     }
   }
@@ -436,6 +459,8 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     }
   }
 
+  // seek 到指定字幕起点并播放；同步更新通知栏字幕文字和界面显示状态。
+  // _playGeneration 在每次调用时递增，用于取消过期的异步链。
   Future<void> playAudioFromSubtitle(Subtitle subtitle) async {
     _isSubtitleEndCalled = false;
     cancelSubtitleTimer();
@@ -449,6 +474,9 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
         shouldShowSubtitle = !isDelaySubtitleDisplay;
       });
       await _audioHandler.play();
+      // play() 是长生命周期 Future，resolve 时可能已开始新导航；
+      // 此处之后不应有依赖当前字幕状态的代码
+      if (gen != _playGeneration) return;
     }
   }
 
@@ -497,8 +525,8 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
   void playPreviousSubtitle() {
     if (subtitles.isEmpty || !_audioHandler.isAudioSourceSet) return;
     final current = subtitles[currentSubtitleIndex];
-    // stop() 后 position 归零但 isAudioSourceSet 仍为 true；isPlaying が false かつ
-    // position が zero なら stopped 状態と見なし 2秒ルールを適用しない
+    // stop() 后 position 归零但 isAudioSourceSet 仍为 true；
+    // isPlaying 为 false 且 position 为零则视为已停止状态，不应用 2 秒重播规则
     final pos = _audioHandler.position;
     final isStopped = !isPlaying && pos == Duration.zero;
     // 延迟暂停时 pos 停在字幕结束处，不代表用户已听完，视为未播放
