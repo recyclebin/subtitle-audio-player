@@ -42,14 +42,14 @@ class MyAudioHandler extends BaseAudioHandler {
     final effectivelyPlaying = isPlaying && !_isDelayPaused;
     playbackState.add(playbackState.value.copyWith(
       controls: [
-        isPlaying ? MediaControl.pause : MediaControl.play,
         MediaControl.skipToPrevious,
+        isPlaying ? MediaControl.pause : MediaControl.play,
         MediaControl.skipToNext,
       ],
       systemActions: const {},
-      // 紧凑视图只显示播放/暂停，为通知标题（字幕文字）留出横向空间；
+      // 紧凑视图只显示播放/暂停（index 1），为通知标题（字幕文字）留出横向空间；
       // 上一句/下一句在展开视图中仍可见。
-      androidCompactActionIndices: const [0],
+      androidCompactActionIndices: const [1],
       playing: effectivelyPlaying,
       processingState: {
         ProcessingState.idle: AudioProcessingState.idle,
@@ -96,12 +96,12 @@ class MyAudioHandler extends BaseAudioHandler {
     // androidStopForegroundOnPause:false 确保通知在暂停后持续显示。
     playbackState.add(playbackState.value.copyWith(
       controls: [
-        MediaControl.pause,
         MediaControl.skipToPrevious,
+        MediaControl.pause,
         MediaControl.skipToNext,
       ],
       systemActions: const {},
-      androidCompactActionIndices: const [0],
+      androidCompactActionIndices: const [1],
       playing: true,
       processingState: AudioProcessingState.ready,
       updatePosition: Duration.zero,
