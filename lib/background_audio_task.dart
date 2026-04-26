@@ -65,7 +65,9 @@ class MyAudioHandler extends BaseAudioHandler {
       }[_audioPlayer.processingState] ?? AudioProcessingState.idle,
       updatePosition: _audioPlayer.position,
       bufferedPosition: _audioPlayer.bufferedPosition,
-      speed: _audioPlayer.speed,
+      // 延迟暂停期间音频实际未在输出，speed 上报 0 以阻止 MediaSession
+      // 按内部时钟把通知栏 position 继续外推。
+      speed: _isDelayPaused ? 0.0 : _audioPlayer.speed,
     ));
   }
 
@@ -94,8 +96,8 @@ class MyAudioHandler extends BaseAudioHandler {
 
   Future<void> setAudioSource(AudioSource source, [MediaItem? item]) async {
     if (item != null) mediaItem.add(item);
-    // 切换音频源时清掉延迟暂停标志，否则旧会话残留的 true 会让
-    // _updateMediaControls() 算出的 effectivelyPlaying 与新音频源状态不符。
+    // 切换音频源时清掉延迟暂停标志，否则上一句 2 秒规则会把新音频
+    // 的已播时长误判为 0（main.dart playPreviousSubtitle）。
     _isDelayPaused = false;
     await _audioPlayer.setAudioSource(source);
     // 新音频源加载可能重置 just_audio 的 speed，重新应用记忆值。
