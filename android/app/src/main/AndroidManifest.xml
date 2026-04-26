@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.example.subtitle_audio_player">
+    package="com.yao.tingjian">
 
     <!-- 不加 xmlns:tools="http://schemas.android.com/tools"，下面添加just_audio_background需要的 service和receiver后，编译会报错-->
 
@@ -22,7 +22,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
 
     <application
-        android:label="Subtitle Audio Player"
+        android:label="听见"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity

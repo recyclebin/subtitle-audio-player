@@ -25,7 +25,7 @@ flutter test test/widget_test.dart
 
 The app has three Dart source files:
 
-**`lib/main.dart`** — The entire UI and playback coordination layer. `SubtitleAudioPlayerState` owns all application state: subtitle list, current index, play mode flags (`isRandomPlay`, `isLoopSingle`, `isDelaySubtitleDisplay`), and the subtitle delay timer. It drives the `MyAudioHandler` and reacts to position updates via `positionStream`.
+**`lib/main.dart`** — The entire UI and playback coordination layer. `TingjianAppState` owns all application state: subtitle list, current index, play mode flags (`isRandomPlay`, `isLoopSingle`, `isDelaySubtitleDisplay`), playback speed, and the subtitle delay timer. It drives the `MyAudioHandler` and reacts to position updates via `positionStream`.
 
 **`lib/background_audio_task.dart`** — `MyAudioHandler` extends `BaseAudioHandler` from `audio_service`. It wraps `just_audio`'s `AudioPlayer` and bridges it to the Android media notification. Key design points:
 - `isPlaying` in the handler reflects *user intent* (not actual audio output). `realPause()` pauses audio without clearing `isPlaying`, so the delay timer can auto-advance after the subtitle reveal period ends.

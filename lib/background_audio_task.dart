@@ -24,9 +24,13 @@ class MyAudioHandler extends BaseAudioHandler {
   // 字幕延迟模式下音频播放到字幕结束点后由 realPause() 置为 true，
   // 用于区分"延迟暂停"与用户手动暂停，影响通知栏播放状态的显示。
   bool _isDelayPaused = false;
+  // 用户期望的播放速度。just_audio 在切换音频源后可能重置 speed，
+  // 需要在 setAudioSource 中重新应用这个值。
+  double _desiredSpeed = 1.0;
 
   bool get isAudioSourceSet => _audioPlayer.audioSource != null;
   bool get isDelayPaused => _isDelayPaused;
+  double get desiredSpeed => _desiredSpeed;
   Duration? get audioDuration => _audioPlayer.duration;
 
   // 同步更新 handler 内部状态、widget 回调和通知栏控件。
@@ -89,7 +93,15 @@ class MyAudioHandler extends BaseAudioHandler {
 
   Future<void> setAudioSource(AudioSource source, [MediaItem? item]) async {
     if (item != null) mediaItem.add(item);
+    // 切换音频源时清掉延迟暂停标志，否则旧会话残留的 true 会让
+    // _updateMediaControls() 算出的 effectivelyPlaying 与新音频源状态不符。
+    _isDelayPaused = false;
     await _audioPlayer.setAudioSource(source);
+    // 新音频源加载可能重置 just_audio 的 speed，重新应用记忆值。
+    // 1.0 是默认值，省一次 platform 调用。
+    if (_desiredSpeed != 1.0) {
+      await _audioPlayer.setSpeed(_desiredSpeed);
+    }
     // Android 前台服务（通知栏）只在 playing:true 时首次启动。
     // 此处短暂发射 playing:true 触发 startForeground()，
     // 随后 _updateMediaControls() 立即还原为实际暂停状态。
@@ -145,6 +157,18 @@ class MyAudioHandler extends BaseAudioHandler {
   Future<void> realPause() async {
     _isDelayPaused = true;
     await _audioPlayer.pause();
+    _updateMediaControls();
+  }
+
+  /// 设置播放速度。无音频源时只记录值，避免 platform 端在未初始化时
+  /// 抛错或挂起；下次 setAudioSource 加载完会自动应用。
+  /// BaseAudioHandler 也定义了 setSpeed（系统侧可能调用），这里覆盖。
+  @override
+  Future<void> setSpeed(double speed) async {
+    _desiredSpeed = speed;
+    if (_audioPlayer.audioSource != null) {
+      await _audioPlayer.setSpeed(speed);
+    }
     _updateMediaControls();
   }
 

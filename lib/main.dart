@@ -20,7 +20,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '字幕音频播放器',
+      title: '听见',
       theme: ThemeData(
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
@@ -29,7 +29,7 @@ class MyApp extends StatelessWidget {
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       themeMode: ThemeMode.system,
-      home: const SubtitleAudioPlayer(),
+      home: const TingjianApp(),
     );
   }
 }
@@ -40,14 +40,14 @@ String _formatDuration(Duration d) {
   return '${d.inHours > 0 ? '${d.inHours}:' : ''}$m:$s';
 }
 
-class SubtitleAudioPlayer extends StatefulWidget {
-  const SubtitleAudioPlayer({super.key});
+class TingjianApp extends StatefulWidget {
+  const TingjianApp({super.key});
 
   @override
-  SubtitleAudioPlayerState createState() => SubtitleAudioPlayerState();
+  TingjianAppState createState() => TingjianAppState();
 }
 
-class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
+class TingjianAppState extends State<TingjianApp>
     with WidgetsBindingObserver {
   late final MyAudioHandler _audioHandler;
   StreamSubscription<Duration>? _positionSubscription;
@@ -67,6 +67,8 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
   // 非延迟模式下始终为 true。
   bool shouldShowSubtitle = false;
   int subtitlePauseDuration = 3;
+  // 0.5-2.0 之间，步长 0.25。所有取值都是 0.25 的整数倍，二进制下精确无漂移。
+  double playbackSpeed = 1.0;
   String? audioFilePath;
   String? subtitleFilePath;
   // 随机模式下的播放历史，用于"上一句"回溯；上限 1000 条防止内存增长
@@ -92,7 +94,7 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     _audioHandler = await AudioService.init(
       builder: () => MyAudioHandler(),
       config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.example.subtitle_audio_player',
+        androidNotificationChannelId: 'com.yao.tingjian',
         androidNotificationChannelName: 'Audio Playback',
         // 保持前台服务运行，防止暂停后通知消失
         androidStopForegroundOnPause: false,
@@ -108,8 +110,21 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     // 将 widget 侧的回调注入 handler，使通知栏按钮能驱动字幕导航和计时器管理
     _audioHandler.cancelTimer = cancelSubtitleTimer;
     _audioHandler.updatePlayingStateCallback = _updatePlayingState;
-    if (mounted) setState(() => _isInitialized = true);
-    loadSettings();
+    // 用 _isPicking=true 包裹恢复过程：不仅播放按钮的 picker 回退入口被阻塞，
+    // 底部 folder_open 按钮调用 pickAudioFileAndFindSubtitle 时也会被
+    // _isPicking 早返回，避免任何 picker 入口与 loadSettings 内的
+    // setFileAudioSources 竞争。
+    // try/finally 保证即使 loadSettings 抛异常也能开放 UI，
+    // 否则 _isInitialized 会永久卡在 false 导致界面无法操作。
+    _isPicking = true;
+    try {
+      await loadSettings();
+    } catch (e) {
+      debugPrint('恢复设置失败: $e');
+    } finally {
+      _isPicking = false;
+      if (mounted) setState(() => _isInitialized = true);
+    }
   }
 
   void _setupPositionListener() {
@@ -185,6 +200,7 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     bool? delaySubtitleDisplay = prefs.getBool('delaySubtitleDisplay');
     int? savedSubtitlePauseDuration = prefs.getInt('subtitlePauseDuration');
     int? savedCurrentSubtitleIndex = prefs.getInt('currentSubtitleIndex');
+    double? savedPlaybackSpeed = prefs.getDouble('playbackSpeed');
     List<String>? savedPlayedSubtitlesIndices =
         prefs.getStringList('playedSubtitlesIndices');
 
@@ -202,6 +218,10 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
         if (savedCurrentSubtitleIndex != null) {
           currentSubtitleIndex = savedCurrentSubtitleIndex;
         }
+        if (savedPlaybackSpeed != null) {
+          // 量化到 0.25 的倍数，防止外部写入或旧版本残留奇怪小数
+          playbackSpeed = _quantizeSpeed(savedPlaybackSpeed);
+        }
         if (savedPlayedSubtitlesIndices != null) {
           playedSubtitlesIndices = savedPlayedSubtitlesIndices
               .map((i) => int.tryParse(i))
@@ -210,6 +230,9 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
         }
       });
     }
+    // 把恢复的速度同步到 handler；无音频源时 handler 只记录值，
+    // 等 setFileAudioSources 加载完会自动应用。
+    await _audioHandler.setSpeed(playbackSpeed);
 
     if (lastAudioFilePath != null &&
         lastAudioFilePath.isNotEmpty &&
@@ -273,8 +296,29 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     await prefs.setBool('delaySubtitleDisplay', isDelaySubtitleDisplay);
     await prefs.setInt('currentSubtitleIndex', currentSubtitleIndex);
     await prefs.setInt('subtitlePauseDuration', subtitlePauseDuration);
+    await prefs.setDouble('playbackSpeed', playbackSpeed);
     await prefs.setStringList('playedSubtitlesIndices',
         playedSubtitlesIndices.map((i) => i.toString()).toList());
+  }
+
+  /// 量化到 0.25 的倍数并 clamp 到 [0.5, 2.0]。
+  /// 0.25 在二进制下精确，量化后的值不会有浮点漂移。
+  double _quantizeSpeed(double s) {
+    final clamped = s.clamp(0.5, 2.0);
+    return (clamped * 4).round() / 4;
+  }
+
+  /// 1.0 → "1"；0.75 → "0.75"。给整数去掉 ".0" 让 UI 更紧凑。
+  String _formatSpeed(double s) {
+    return s == s.roundToDouble() ? '${s.toInt()}' : '$s';
+  }
+
+  void _setPlaybackSpeed(double s) {
+    final next = _quantizeSpeed(s);
+    if (next == playbackSpeed) return;
+    setState(() => playbackSpeed = next);
+    _audioHandler.setSpeed(next);
+    saveSettings();
   }
 
   Future<void> setFileAudioSources(String filePath) async {
@@ -336,107 +380,124 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     final String newAudioFilePath = audioFiles.first.path!;
     final String newSubtitleFilePath = srtFiles.first.path!;
 
-    // 保存当前状态，用于取消时回滚
-    final prevSubtitles = subtitles;
+    // 保存当前会话快照：仅在音频源已切换后失败/取消时用于恢复，
+    // 不再用于"回滚字段"——字段直到提交阶段才会被修改。
     final prevAudioPath = audioFilePath;
-    final prevSubtitlePath = subtitleFilePath;
-    final prevPlayedIndices = List<int>.from(playedSubtitlesIndices);
+    final prevSubtitles = subtitles;
+    final prevIndex = currentSubtitleIndex;
 
+    // 1. 先解析字幕到局部变量；解析失败时不动任何状态，旧会话原样保留。
+    final List<Subtitle> parsedSubtitles;
     try {
-      subtitles = await parseSrtFile(newSubtitleFilePath);
-      if (subtitles.isEmpty) throw Exception('字幕文件为空');
-      await setFileAudioSources(newAudioFilePath);
-
-      // 时长合理性检查：字幕最后时间戳不应远超音频时长
-      final audioDur = _audioHandler.audioDuration;
-      if (audioDur != null && subtitles.isNotEmpty) {
-        final lastSrt = subtitles.last.endTime;
-        if (lastSrt > audioDur * 1.1) {
-          if (!mounted) return;
-          final proceed = await showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('文件可能不匹配'),
-              content: Text(
-                  '字幕最后时间戳 ${_formatDuration(lastSrt)} 远超音频时长 ${_formatDuration(audioDur)}，确认继续？'),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    child: const Text('取消')),
-                TextButton(
-                    onPressed: () => Navigator.of(context).pop(true),
-                    child: const Text('继续')),
-              ],
-            ),
-          );
-          if (proceed != true) {
-            // 取消：恢复旧音频源，避免 handler 与 UI 状态不一致
-            subtitles = prevSubtitles;
-            subtitleFilePath = prevSubtitlePath;
-            playedSubtitlesIndices = prevPlayedIndices;
-            if (prevAudioPath != null) {
-              await setFileAudioSources(prevAudioPath);
-              if (subtitles.isNotEmpty) {
-                await _audioHandler.seek(
-                    subtitles[currentSubtitleIndex].startTime);
-              }
-            } else {
-              await _audioHandler.stop();
-            }
-            return;
-          }
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          isFileLoaded = true;
-          shouldShowSubtitle = !isDelaySubtitleDisplay;
-          audioFilePath = newAudioFilePath;
-          subtitleFilePath = newSubtitleFilePath;
-          playedSubtitlesIndices = [];
-          currentSubtitleIndex =
-              isRandomPlay ? _random.nextInt(subtitles.length) : 0;
-        });
-        playAudioFromSubtitle(subtitles[currentSubtitleIndex]);
-        saveSettings();
-      }
+      parsedSubtitles = await parseSrtFile(newSubtitleFilePath);
+      if (parsedSubtitles.isEmpty) throw Exception('字幕文件为空');
     } catch (e) {
-      debugPrint('无法加载文件: $e');
+      debugPrint('解析字幕文件失败: $e');
       if (!mounted) return;
-      await showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Text("加载文件失败"),
-            content: Text("加载音频或字幕文件时出错：$e"),
+      await _showLoadErrorDialog(e);
+      return;
+    }
+
+    // 2. 切换音频源；失败时尝试恢复上次音频源，不 wipe 字段。
+    try {
+      await setFileAudioSources(newAudioFilePath);
+    } catch (e) {
+      debugPrint('加载音频文件失败: $e');
+      await _restorePrevAudio(prevAudioPath, prevSubtitles, prevIndex);
+      if (!mounted) return;
+      await _showLoadErrorDialog(e);
+      return;
+    }
+
+    // 3. 时长合理性检查：字幕最后时间戳不应远超音频时长
+    final audioDur = _audioHandler.audioDuration;
+    if (audioDur != null) {
+      final lastSrt = parsedSubtitles.last.endTime;
+      if (lastSrt > audioDur * 1.1) {
+        if (!mounted) return;
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('文件可能不匹配'),
+            content: Text(
+                '字幕最后时间戳 ${_formatDuration(lastSrt)} 远超音频时长 ${_formatDuration(audioDur)}，确认继续？'),
             actions: [
               TextButton(
-                child: const Text("确定"),
-                onPressed: () => Navigator.of(context).pop(),
-              )
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('取消')),
+              TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('继续')),
             ],
-          );
-        },
-      );
-      if (mounted) {
-        setState(() {
-          subtitleFilePath = null;
-          audioFilePath = null;
-          isFileLoaded = false;
-          shouldShowSubtitle = false;
-        });
-        await _audioHandler.stop();
-        saveSettings();
+          ),
+        );
+        if (proceed != true) {
+          await _restorePrevAudio(prevAudioPath, prevSubtitles, prevIndex);
+          return;
+        }
       }
     }
+
+    // 4. 提交：所有可能失败的步骤都已成功，开始更新字段。
+    if (!mounted) return;
+    setState(() {
+      subtitles = parsedSubtitles;
+      isFileLoaded = true;
+      shouldShowSubtitle = !isDelaySubtitleDisplay;
+      audioFilePath = newAudioFilePath;
+      subtitleFilePath = newSubtitleFilePath;
+      playedSubtitlesIndices = [];
+      currentSubtitleIndex =
+          isRandomPlay ? _random.nextInt(parsedSubtitles.length) : 0;
+    });
+    playAudioFromSubtitle(subtitles[currentSubtitleIndex]);
+    saveSettings();
+  }
+
+  /// 取消/失败时恢复上次音频源；prevAudioPath 为 null 时停止播放。
+  /// 任何步骤异常均吞掉，避免在错误处理路径里再次抛出。
+  Future<void> _restorePrevAudio(String? prevAudioPath,
+      List<Subtitle> prevSubtitles, int prevIndex) async {
+    try {
+      if (prevAudioPath != null) {
+        await setFileAudioSources(prevAudioPath);
+        if (prevSubtitles.isNotEmpty &&
+            prevIndex >= 0 &&
+            prevIndex < prevSubtitles.length) {
+          await _audioHandler.seek(prevSubtitles[prevIndex].startTime);
+        }
+      } else {
+        await _audioHandler.stop();
+      }
+    } catch (e) {
+      debugPrint('恢复上次音频源失败: $e');
+    }
+  }
+
+  Future<void> _showLoadErrorDialog(Object error) async {
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("加载文件失败"),
+          content: Text("加载音频或字幕文件时出错：$error"),
+          actions: [
+            TextButton(
+              child: const Text("确定"),
+              onPressed: () => Navigator.of(context).pop(),
+            )
+          ],
+        );
+      },
+    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     // dispose() 是同步的，saveSettings() 无法 await；didChangeAppLifecycleState
-    // 已在 paused/inactive 时保存，此处仅作兜底，快速退出时写入不保证完成。
+    // 已在 paused 时保存，此处仅作兜底，快速退出时写入不保证完成。
     saveSettings(); // ignore: unawaited_futures
     _saveSettingsDebounce?.cancel();
     _subtitleDelayTimer?.cancel();
@@ -566,117 +627,105 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
         ? path.basenameWithoutExtension(audioFilePath!)
         : null;
 
+    // 背景：深色基底 + 顶部柔和紫色光晕。RadialGradient 一次完成，
+    // 比"两层 LinearGradient + 阴影"轻得多，也更接近 Apple Music 的触感。
+    final bgBase = isDark ? const Color(0xFF0B0B14) : const Color(0xFFF6F4FB);
+    final bgGlow = isDark
+        ? const Color(0xFFA855F7).withValues(alpha: 0.22)
+        : const Color(0xFFA855F7).withValues(alpha: 0.10);
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [const Color(0xFF0A0A1A), const Color(0xFF1A0A2E)]
-              : [const Color(0xFF818CF8), const Color(0xFFC084FC)],
+        gradient: RadialGradient(
+          center: const Alignment(0, -1.1),
+          radius: 1.3,
+          colors: [bgGlow, bgBase],
+          stops: const [0.0, 0.55],
         ),
       ),
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          backgroundColor: isDark
-              ? Colors.white.withValues(alpha: 0.04)
-              : Colors.white.withValues(alpha: 0.62),
+          backgroundColor: Colors.transparent,
           elevation: 0,
           scrolledUnderElevation: 0,
           surfaceTintColor: Colors.transparent,
           centerTitle: true,
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(1),
-            child: Container(
-              height: 1,
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : const Color(0xFF6D28D9).withValues(alpha: 0.10),
-            ),
-          ),
+          // 取消底部分割线：纯净背景下细线显多余
           title: Text(
-            '字幕音频播放器',
+            '听见',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: isDark ? const Color(0xFFD4D4FF) : const Color(0xFF1E0A3C),
+              letterSpacing: 2.0,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.55)
+                  : const Color(0xFF2E1065).withValues(alpha: 0.55),
             ),
           ),
         ),
         body: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              // 字幕区固定60%，控制区占40%
-              final subtitleHeight = constraints.maxHeight * 0.6;
-              final controlsHeight = constraints.maxHeight * 0.4;
+              // 字幕是主视觉，占 70%；控制压缩到 30%。
+              // 设置（速度、延迟）放进底部抽屉，不再占首屏纵向空间。
+              final subtitleHeight = constraints.maxHeight * 0.7;
+              final controlsHeight = constraints.maxHeight * 0.3;
 
               return Column(
                 children: [
-                  // 文件名（位于字幕区上方）
+                  // 文件名：极克制的小字，让字幕成为唯一焦点
                   if (fileName != null)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 6),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                       child: Text(
                         fileName,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.2,
                           color: isDark
-                              ? Colors.white.withValues(alpha: 0.50)
-                              : Colors.white.withValues(alpha: 0.85),
+                              ? Colors.white.withValues(alpha: 0.40)
+                              : const Color(0xFF2E1065)
+                                  .withValues(alpha: 0.50),
                         ),
                         textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
 
-                  // 字幕展示区 - 占据60%高度，圆角卡片样式
+                  // 字幕展示区 - 占据 70% 高度
+                  // 去掉重阴影和白边框；用轻微背景色把卡片从背景中"浮"出来即可
                   Container(
                     width: double.infinity,
-                    height: max(0, subtitleHeight - (fileName != null ? 40 : 0)),
+                    height: max(0, subtitleHeight - (fileName != null ? 36 : 0)),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Container(
                       decoration: BoxDecoration(
                         color: isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.white.withValues(alpha: 0.88),
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.10)
-                              : Colors.white,
-                          width: 1,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: isDark
-                                ? Colors.black.withValues(alpha: 0.40)
-                                : const Color(0xFF6D28D9)
-                                    .withValues(alpha: 0.18),
-                            blurRadius: 24,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
+                            ? Colors.white.withValues(alpha: 0.035)
+                            : Colors.white.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(28),
                       ),
                       child: Center(
                         child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(24),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 28, vertical: 28),
                           child: Text(
                             shouldShowSubtitle ? currentSubtitle : '',
                             style: TextStyle(
                               fontSize: _subtitleFontSize,
-                              height: 1.8,
-                              fontWeight:
-                                  isDark ? FontWeight.w300 : FontWeight.w400,
+                              height: 1.85,
+                              fontWeight: FontWeight.w300,
+                              letterSpacing: 0.3,
                               color: shouldShowSubtitle
                                   ? (isDark
-                                      ? Colors.white.withValues(alpha: 0.88)
-                                      : const Color(0xFF2E1065))
+                                      ? Colors.white.withValues(alpha: 0.92)
+                                      : const Color(0xFF1E0A3C))
                                   : (isDark
-                                      ? Colors.white.withValues(alpha: 0.15)
-                                      : const Color(0xFF2E1065)
-                                          .withValues(alpha: 0.20)),
+                                      ? Colors.white.withValues(alpha: 0.08)
+                                      : const Color(0xFF1E0A3C)
+                                          .withValues(alpha: 0.10)),
                             ),
                             textAlign: TextAlign.center,
                           ),
@@ -685,29 +734,32 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
                     ),
                   ),
 
-                  // 字幕进度（位于字幕区和控制区之间）
+                  // 字幕进度：极小、低对比，不抢戏
                   if (subtitles.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
                       child: Text(
                         '${currentSubtitleIndex + 1} / ${subtitles.length}',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.5,
                           color: isDark
-                              ? Colors.white.withValues(alpha: 0.25)
-                              : Colors.white.withValues(alpha: 0.65),
+                              ? Colors.white.withValues(alpha: 0.30)
+                              : const Color(0xFF2E1065)
+                                  .withValues(alpha: 0.40),
                         ),
                       ),
                     ),
 
-                  // 控制区 - 占据40%高度，包含播放控制和延迟设置
+                  // 控制区 - 占据30%：上半播放按钮，下半统一图标行
                   SizedBox(
-                    height: controlsHeight - (subtitles.isNotEmpty ? 32 : 0),
+                    height: controlsHeight - (subtitles.isNotEmpty ? 24 : 0),
                     child: Column(
                       children: [
                         // 播放控制区：播放/暂停、上一句、下一句
                         Expanded(
-                          child: Container(
+                          child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 40),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -750,137 +802,76 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
                           ),
                         ),
 
-                        // 字幕延迟控制：开关 + 延迟时间调节（- N + 秒）
-                        Container(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 4),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.white.withValues(alpha: 0.75),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
+                        // 统一图标行：速度 / 延迟 / 随机 / 循环 / 文件
+                        // 极轻的卡片背景，无阴影无边框，让图标自己说话
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          child: Container(
+                            decoration: BoxDecoration(
                               color: isDark
-                                  ? Colors.white.withValues(alpha: 0.08)
-                                  : Colors.white.withValues(alpha: 0.90),
-                              width: 1,
+                                  ? Colors.white.withValues(alpha: 0.04)
+                                  : Colors.white.withValues(alpha: 0.50),
+                              borderRadius: BorderRadius.circular(22),
                             ),
-                            boxShadow: isDark
-                                ? []
-                                : [
-                                    BoxShadow(
-                                      color: const Color(0xFF6D28D9)
-                                          .withValues(alpha: 0.10),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Switch(
-                                value: isDelaySubtitleDisplay,
-                                activeThumbColor: const Color(0xFFA855F7),
-                                onChanged: (v) {
-                                  setState(() {
-                                    isDelaySubtitleDisplay = v;
-                                    // 关闭延迟时若字幕尚未显示，立即显示
-                                    if (!v) shouldShowSubtitle = true;
-                                  });
-                                  if (!v) cancelSubtitleTimer();
-                                  saveSettings();
-                                },
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                '字幕延迟',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.55)
-                                      : const Color(0xFF6D28D9)
-                                          .withValues(alpha: 0.70),
+                            child: Row(
+                              children: [
+                                _buildActionItem(
+                                  icon: Icons.speed_rounded,
+                                  label: '${_formatSpeed(playbackSpeed)}x',
+                                  isActive: playbackSpeed != 1.0,
+                                  onTap: _isInitialized ? _showSpeedSheet : null,
+                                  isDark: isDark,
                                 ),
-                              ),
-                              const SizedBox(width: 10),
-                              _buildDelayBtn(Icons.remove, () {
-                                if (subtitlePauseDuration > 1) {
-                                  setState(() => subtitlePauseDuration--);
-                                  saveSettings();
-                                }
-                              }, isDark),
-                              Container(
-                                width: 36,
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '$subtitlePauseDuration',
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFFA855F7),
-                                  ),
+                                _buildActionItem(
+                                  icon: Icons.timer_outlined,
+                                  label: isDelaySubtitleDisplay
+                                      ? '${subtitlePauseDuration}s'
+                                      : '关',
+                                  isActive: isDelaySubtitleDisplay,
+                                  onTap: _isInitialized ? _showDelaySheet : null,
+                                  isDark: isDark,
                                 ),
-                              ),
-                              _buildDelayBtn(Icons.add, () {
-                                if (subtitlePauseDuration >= 60) return;
-                                setState(() => subtitlePauseDuration++);
-                                saveSettings();
-                              }, isDark),
-                              const SizedBox(width: 6),
-                              Text(
-                                '秒',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.55)
-                                      : const Color(0xFF6D28D9)
-                                          .withValues(alpha: 0.70),
+                                _buildActionItem(
+                                  icon: Icons.shuffle_rounded,
+                                  label: '随机',
+                                  isActive: isRandomPlay,
+                                  onTap: _isInitialized
+                                      ? () {
+                                          setState(() {
+                                            if (!isRandomPlay) {
+                                              playedSubtitlesIndices.clear();
+                                            }
+                                            isRandomPlay = !isRandomPlay;
+                                          });
+                                          saveSettings();
+                                        }
+                                      : null,
+                                  isDark: isDark,
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // 底部快捷操作：随机播放、单曲循环、打开文件
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 8),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildBottomBtn(
-                                Icons.shuffle_rounded,
-                                isRandomPlay,
-                                () {
-                                  setState(() {
-                                    if (!isRandomPlay) {
-                                      playedSubtitlesIndices.clear();
-                                    }
-                                    isRandomPlay = !isRandomPlay;
-                                  });
-                                  saveSettings();
-                                },
-                                isDark,
-                              ),
-                              _buildBottomBtn(
-                                Icons.repeat_one_rounded,
-                                isLoopSingle,
-                                () {
-                                  setState(() => isLoopSingle = !isLoopSingle);
-                                  saveSettings();
-                                },
-                                isDark,
-                              ),
-                              _buildBottomBtn(
-                                Icons.folder_open_rounded,
-                                false,
-                                pickAudioFileAndFindSubtitle,
-                                isDark,
-                              ),
-                            ],
+                                _buildActionItem(
+                                  icon: Icons.repeat_one_rounded,
+                                  label: '循环',
+                                  isActive: isLoopSingle,
+                                  onTap: _isInitialized
+                                      ? () {
+                                          setState(() =>
+                                              isLoopSingle = !isLoopSingle);
+                                          saveSettings();
+                                        }
+                                      : null,
+                                  isDark: isDark,
+                                ),
+                                _buildActionItem(
+                                  icon: Icons.folder_open_rounded,
+                                  label: '文件',
+                                  isActive: false,
+                                  onTap: _isInitialized
+                                      ? pickAudioFileAndFindSubtitle
+                                      : null,
+                                  isDark: isDark,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -895,82 +886,74 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     );
   }
 
+  /// 抽屉里的 +/- 调节按钮：圆形扁平，紫色填充弱化版。
   Widget _buildDelayBtn(IconData icon, VoidCallback onTap, bool isDark) {
-    const radius = BorderRadius.all(Radius.circular(10));
     final bgColor = isDark
-        ? const Color(0xFFA855F7).withValues(alpha: 0.15)
-        : Colors.white.withValues(alpha: 0.75);
-    final borderColor = isDark
-        ? const Color(0xFFA855F7).withValues(alpha: 0.30)
-        : const Color(0xFFA855F7).withValues(alpha: 0.40);
+        ? Colors.white.withValues(alpha: 0.08)
+        : const Color(0xFF2E1065).withValues(alpha: 0.06);
     return Material(
       color: bgColor,
-      borderRadius: radius,
+      shape: const CircleBorder(),
       child: InkWell(
         onTap: onTap,
-        borderRadius: radius,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            borderRadius: radius,
-            border: Border.all(color: borderColor, width: 1),
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(
+            icon,
+            size: 22,
+            color: const Color(0xFFA855F7),
           ),
-          child: Icon(icon, size: 20, color: const Color(0xFFA855F7)),
         ),
       ),
     );
   }
 
-  Widget _buildBottomBtn(
-      IconData icon, bool isActive, VoidCallback onTap, bool isDark) {
-    const radius = BorderRadius.all(Radius.circular(12));
-    final bgColor = isActive
-        ? const Color(0xFFA855F7).withValues(alpha: 0.18)
-        : (isDark
-            ? Colors.white.withValues(alpha: 0.05)
-            : Colors.white.withValues(alpha: 0.75));
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        boxShadow: isDark
-            ? []
-            : [
-                BoxShadow(
-                  color: const Color(0xFF6D28D9).withValues(alpha: 0.10),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-      ),
+  /// 统一图标行的单个条目：图标 + 小字标签，等分占据父容器宽度。
+  /// 平时用中性灰，紫色仅在 isActive=true 时出现，
+  /// 让"打开了什么"在视觉上一眼可辨。
+  Widget _buildActionItem({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required VoidCallback? onTap,
+    required bool isDark,
+  }) {
+    const activeColor = Color(0xFFA855F7);
+    final inactiveColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : const Color(0xFF1E0A3C).withValues(alpha: 0.62);
+    final disabledColor = isDark
+        ? Colors.white.withValues(alpha: 0.20)
+        : const Color(0xFF1E0A3C).withValues(alpha: 0.22);
+    final color = onTap == null
+        ? disabledColor
+        : (isActive ? activeColor : inactiveColor);
+    return Expanded(
       child: Material(
-        color: bgColor,
-        borderRadius: radius,
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
         child: InkWell(
           onTap: onTap,
-          borderRadius: radius,
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              border: Border.all(
-                color: isActive
-                    ? const Color(0xFFA855F7).withValues(alpha: 0.40)
-                    : (isDark
-                        ? Colors.white.withValues(alpha: 0.08)
-                        : Colors.white.withValues(alpha: 0.90)),
-                width: 1,
-              ),
-            ),
-            child: Icon(
-              icon,
-              size: 20,
-              color: isActive
-                  ? const Color(0xFFA855F7)
-                  : (isDark
-                      ? Colors.white.withValues(alpha: 0.40)
-                      : const Color(0xFF6D28D9).withValues(alpha: 0.45)),
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 22, color: color),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.2,
+                    color: color,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -978,105 +961,241 @@ class SubtitleAudioPlayerState extends State<SubtitleAudioPlayer>
     );
   }
 
+  /// 底部抽屉外壳：drag handle + title + child。
+  /// dark 模式用深紫，light 模式用纯白；圆角顶部，安全区底部内边距。
+  Widget _buildSheetShell(
+      BuildContext sheetContext, bool isDark, String title, Widget child) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1A0A2E) : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+        top: 12,
+        bottom: MediaQuery.of(sheetContext).padding.bottom + 28,
+        left: 24,
+        right: 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.20)
+                  : const Color(0xFF6D28D9).withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: isDark
+                  ? const Color(0xFFD4D4FF)
+                  : const Color(0xFF1E0A3C),
+            ),
+          ),
+          const SizedBox(height: 28),
+          child,
+        ],
+      ),
+    );
+  }
+
+  void _showSpeedSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
+        // StatefulBuilder：父 setState 不会重建抽屉内部，
+        // 用 setSheetState 在调整后立刻刷新抽屉内显示的数值。
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return _buildSheetShell(
+              sheetContext,
+              isDark,
+              '播放速度',
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildDelayBtn(Icons.remove, () {
+                    _setPlaybackSpeed(playbackSpeed - 0.25);
+                    setSheetState(() {});
+                  }, isDark),
+                  SizedBox(
+                    width: 100,
+                    child: Text(
+                      '${_formatSpeed(playbackSpeed)}x',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFA855F7),
+                      ),
+                    ),
+                  ),
+                  _buildDelayBtn(Icons.add, () {
+                    _setPlaybackSpeed(playbackSpeed + 0.25);
+                    setSheetState(() {});
+                  }, isDark),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showDelaySheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return _buildSheetShell(
+              sheetContext,
+              isDark,
+              '字幕延迟显示',
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Switch(
+                        value: isDelaySubtitleDisplay,
+                        activeThumbColor: const Color(0xFFA855F7),
+                        onChanged: (v) {
+                          setState(() {
+                            isDelaySubtitleDisplay = v;
+                            // 关闭延迟时若字幕尚未显示，立即显示
+                            if (!v) shouldShowSubtitle = true;
+                          });
+                          if (!v) cancelSubtitleTimer();
+                          saveSettings();
+                          setSheetState(() {});
+                        },
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        isDelaySubtitleDisplay ? '已开启' : '已关闭',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.70)
+                              : const Color(0xFF2E1065)
+                                  .withValues(alpha: 0.75),
+                        ),
+                      ),
+                    ],
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    child: isDelaySubtitleDisplay
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 24),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _buildDelayBtn(Icons.remove, () {
+                                  if (subtitlePauseDuration > 1) {
+                                    setState(() => subtitlePauseDuration--);
+                                    saveSettings();
+                                    setSheetState(() {});
+                                  }
+                                }, isDark),
+                                SizedBox(
+                                  width: 100,
+                                  child: Text(
+                                    '${subtitlePauseDuration}s',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 32,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFFA855F7),
+                                    ),
+                                  ),
+                                ),
+                                _buildDelayBtn(Icons.add, () {
+                                  if (subtitlePauseDuration < 60) {
+                                    setState(() => subtitlePauseDuration++);
+                                    saveSettings();
+                                    setSheetState(() {});
+                                  }
+                                }, isDark),
+                              ],
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 主播放按钮：80px 实心紫色圆，无发光阴影，按下水波。
+  /// 副按钮（上一句/下一句）：纯图标，无背景，靠水波反馈。
   Widget _buildPlayBtn(IconData icon, VoidCallback? onTap, bool isDark,
       {bool isPrimary = false}) {
     final enabled = onTap != null;
     if (isPrimary) {
+      const activeColor = Color(0xFFA855F7);
+      final disabledBg = isDark
+          ? Colors.white.withValues(alpha: 0.08)
+          : const Color(0xFF2E1065).withValues(alpha: 0.10);
       return Material(
-        color: Colors.transparent,
+        color: enabled ? activeColor : disabledBg,
         shape: const CircleBorder(),
-        // boxShadow 必须放在外层 Container 而非 Ink，因为 Ink 不支持 boxShadow
-        child: Container(
-          width: 96,
-          height: 96,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            boxShadow: enabled
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFFA855F7)
-                          .withValues(alpha: isDark ? 0.55 : 0.40),
-                      blurRadius: isDark ? 24 : 16,
-                      spreadRadius: 2,
-                      offset: Offset.zero,
-                    ),
-                  ]
-                : [],
-          ),
-          child: Ink(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: enabled
-                  ? const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFFA855F7), Color(0xFF6366F1)],
-                    )
-                  : null,
-              color: enabled ? null : Colors.white.withValues(alpha: 0.12),
-            ),
-            child: InkWell(
-              onTap: onTap,
-              customBorder: const CircleBorder(),
-              child: Icon(
-                icon,
-                size: 48,
-                color: enabled
-                    ? Colors.white
-                    : Colors.white.withValues(alpha: 0.25),
-              ),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: SizedBox(
+            width: 80,
+            height: 80,
+            child: Icon(
+              icon,
+              size: 40,
+              color: enabled
+                  ? Colors.white
+                  : (isDark
+                      ? Colors.white.withValues(alpha: 0.30)
+                      : const Color(0xFF2E1065).withValues(alpha: 0.30)),
             ),
           ),
         ),
       );
     }
-    final secondaryBg = isDark
-        ? Colors.white.withValues(alpha: 0.07)
-        : Colors.white.withValues(alpha: 0.75);
+    final iconColor = enabled
+        ? (isDark
+            ? Colors.white.withValues(alpha: 0.85)
+            : const Color(0xFF2E1065).withValues(alpha: 0.85))
+        : (isDark
+            ? Colors.white.withValues(alpha: 0.20)
+            : const Color(0xFF2E1065).withValues(alpha: 0.25));
     return Material(
       color: Colors.transparent,
       shape: const CircleBorder(),
-      child: Container(
-        width: 80,
-        height: 80,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          boxShadow: isDark
-              ? []
-              : [
-                  BoxShadow(
-                    color: const Color(0xFF6D28D9).withValues(alpha: 0.15),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-        ),
-        child: Ink(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: secondaryBg,
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.10)
-                  : Colors.white.withValues(alpha: 0.90),
-              width: 1,
-            ),
-          ),
-          child: InkWell(
-            onTap: onTap,
-            customBorder: const CircleBorder(),
-            child: Icon(
-              icon,
-              size: 36,
-              color: enabled
-                  ? (isDark
-                      ? Colors.white.withValues(alpha: 0.55)
-                      : const Color(0xFF6D28D9).withValues(alpha: 0.55))
-                  : (isDark
-                      ? Colors.white.withValues(alpha: 0.20)
-                      : const Color(0xFF6D28D9).withValues(alpha: 0.20)),
-            ),
-          ),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 64,
+          height: 64,
+          child: Icon(icon, size: 36, color: iconColor),
         ),
       ),
     );

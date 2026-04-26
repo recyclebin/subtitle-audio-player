@@ -1,4 +1,4 @@
-package com.example.subtitle_audio_player
+package com.yao.tingjian
 
 import io.flutter.embedding.android.FlutterActivity
 
