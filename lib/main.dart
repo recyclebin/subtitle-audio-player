@@ -57,16 +57,19 @@ class TingjianAppState extends State<TingjianApp>
   bool isRandomPlay = false;
   bool isLoopSingle = false;
   bool isPlaying = false;
+  // ON：播放时隐藏字幕，仅在播放间隔时显示；OFF：播放与间隔时均显示字幕。
   bool isDelaySubtitleDisplay = false;
   // 防止字幕结束回调在同一条字幕内重复触发（position stream 高频推送）
   bool _isSubtitleEndCalled = false;
   // 每次导航递增；过期的异步 seek/play 完成后检测到不匹配则放弃
   int _playGeneration = 0;
   final _random = Random();
-  // 字幕延迟模式下默认 false（隐藏），字幕结束后由 onSubtitleEnd 置为 true（显示）；
-  // 非延迟模式下始终为 true。
+  // ON 模式下默认 false（隐藏），字幕结束后由 onSubtitleEnd 置为 true（显示）；
+  // OFF 模式下始终为 true。
   bool shouldShowSubtitle = false;
-  int subtitlePauseDuration = 3;
+  // 每条字幕播放结束后强制暂停的时长，单位秒。范围 [0.5, 5.0]，步进 0.5；
+  // 0.5 在二进制下精确，量化无浮点漂移。
+  double playInterval = 1.5;
   // 0.5-2.0 之间，步长 0.25。所有取值都是 0.25 的整数倍，二进制下精确无漂移。
   double playbackSpeed = 1.0;
   String? audioFilePath;
@@ -161,26 +164,26 @@ class TingjianAppState extends State<TingjianApp>
   }
 
   Future<void> onSubtitleEnd() async {
+    // 用 realPause 而非 pause：realPause 不改变 isPlaying，
+    // 使计时器到期后能通过 isPlaying 判断用户意图决定是否继续播放
+    if (!isPlaying) return;
+    await _audioHandler.realPause();
+    if (!mounted) return;
     if (isDelaySubtitleDisplay) {
-      // 用 realPause 而非 pause：realPause 不改变 isPlaying，
-      // 使计时器到期后能通过 isPlaying 判断用户意图决定是否继续播放
-      if (!isPlaying) return;
-      await _audioHandler.realPause();
-      if (!mounted) return;
+      // 播放期间字幕被隐藏，间隔开始时揭示
       setState(() {
         shouldShowSubtitle = true;
       });
       _audioHandler.updateDisplaySubtitle(subtitles[currentSubtitleIndex].text);
-      _subtitleDelayTimer?.cancel();
-      final timerGen = ++_timerGeneration;
-      _subtitleDelayTimer = Timer(Duration(seconds: subtitlePauseDuration), () {
-        if (mounted && isPlaying && timerGen == _timerGeneration) {
-          playNextSubtitle();
-        }
-      });
-    } else {
-      if (mounted && isPlaying) playNextSubtitle();
     }
+    _subtitleDelayTimer?.cancel();
+    final timerGen = ++_timerGeneration;
+    final intervalMs = (playInterval * 1000).round();
+    _subtitleDelayTimer = Timer(Duration(milliseconds: intervalMs), () {
+      if (mounted && isPlaying && timerGen == _timerGeneration) {
+        playNextSubtitle();
+      }
+    });
     // _isSubtitleEndCalled 不在此处重置，而是延迟到 playAudioFromSubtitle 开头重置，
     // 防止 seek 完成前 position stream 仍停留在旧位置时再次触发 onSubtitleEnd
   }
@@ -198,7 +201,7 @@ class TingjianAppState extends State<TingjianApp>
     bool? loopSingle = prefs.getBool('loopSingle');
     bool? randomPlay = prefs.getBool('randomPlay');
     bool? delaySubtitleDisplay = prefs.getBool('delaySubtitleDisplay');
-    int? savedSubtitlePauseDuration = prefs.getInt('subtitlePauseDuration');
+    double? savedPlayInterval = prefs.getDouble('playInterval');
     int? savedCurrentSubtitleIndex = prefs.getInt('currentSubtitleIndex');
     double? savedPlaybackSpeed = prefs.getDouble('playbackSpeed');
     List<String>? savedPlayedSubtitlesIndices =
@@ -212,8 +215,8 @@ class TingjianAppState extends State<TingjianApp>
           isDelaySubtitleDisplay = delaySubtitleDisplay;
           shouldShowSubtitle = !isDelaySubtitleDisplay;
         }
-        if (savedSubtitlePauseDuration != null) {
-          subtitlePauseDuration = savedSubtitlePauseDuration.clamp(1, 60);
+        if (savedPlayInterval != null) {
+          playInterval = _quantizeInterval(savedPlayInterval);
         }
         if (savedCurrentSubtitleIndex != null) {
           currentSubtitleIndex = savedCurrentSubtitleIndex;
@@ -295,7 +298,7 @@ class TingjianAppState extends State<TingjianApp>
     await prefs.setBool('randomPlay', isRandomPlay);
     await prefs.setBool('delaySubtitleDisplay', isDelaySubtitleDisplay);
     await prefs.setInt('currentSubtitleIndex', currentSubtitleIndex);
-    await prefs.setInt('subtitlePauseDuration', subtitlePauseDuration);
+    await prefs.setDouble('playInterval', playInterval);
     await prefs.setDouble('playbackSpeed', playbackSpeed);
     await prefs.setStringList('playedSubtitlesIndices',
         playedSubtitlesIndices.map((i) => i.toString()).toList());
@@ -311,6 +314,12 @@ class TingjianAppState extends State<TingjianApp>
   /// 1.0 → "1"；0.75 → "0.75"。给整数去掉 ".0" 让 UI 更紧凑。
   String _formatSpeed(double s) {
     return s == s.roundToDouble() ? '${s.toInt()}' : '$s';
+  }
+
+  /// 量化到 0.5 的倍数并 clamp 到 [0.5, 5.0]。
+  double _quantizeInterval(double v) {
+    final clamped = v.clamp(0.5, 5.0);
+    return (clamped * 2).round() / 2;
   }
 
   void _setPlaybackSpeed(double s) {
@@ -824,9 +833,7 @@ class TingjianAppState extends State<TingjianApp>
                                 ),
                                 _buildActionItem(
                                   icon: Icons.timer_outlined,
-                                  label: isDelaySubtitleDisplay
-                                      ? '${subtitlePauseDuration}s'
-                                      : '关',
+                                  label: '${_formatSpeed(playInterval)}s',
                                   isActive: isDelaySubtitleDisplay,
                                   onTap: _isInitialized ? _showDelaySheet : null,
                                   isDark: isDark,
@@ -1064,10 +1071,44 @@ class TingjianAppState extends State<TingjianApp>
             return _buildSheetShell(
               sheetContext,
               isDark,
-              '字幕延迟显示',
+              '播放间隔',
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildDelayBtn(Icons.remove, () {
+                        final next = _quantizeInterval(playInterval - 0.5);
+                        if (next != playInterval) {
+                          setState(() => playInterval = next);
+                          saveSettings();
+                          setSheetState(() {});
+                        }
+                      }, isDark),
+                      SizedBox(
+                        width: 100,
+                        child: Text(
+                          '${_formatSpeed(playInterval)}s',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFA855F7),
+                          ),
+                        ),
+                      ),
+                      _buildDelayBtn(Icons.add, () {
+                        final next = _quantizeInterval(playInterval + 0.5);
+                        if (next != playInterval) {
+                          setState(() => playInterval = next);
+                          saveSettings();
+                          setSheetState(() {});
+                        }
+                      }, isDark),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -1077,17 +1118,23 @@ class TingjianAppState extends State<TingjianApp>
                         onChanged: (v) {
                           setState(() {
                             isDelaySubtitleDisplay = v;
-                            // 关闭延迟时若字幕尚未显示，立即显示
-                            if (!v) shouldShowSubtitle = true;
+                            // 关闭"仅间隔显示"时立刻补回字幕，避免界面/通知栏卡在空白
+                            if (!v) {
+                              shouldShowSubtitle = true;
+                              if (subtitles.isNotEmpty &&
+                                  currentSubtitleIndex < subtitles.length) {
+                                _audioHandler.updateDisplaySubtitle(
+                                    subtitles[currentSubtitleIndex].text);
+                              }
+                            }
                           });
-                          if (!v) cancelSubtitleTimer();
                           saveSettings();
                           setSheetState(() {});
                         },
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        isDelaySubtitleDisplay ? '已开启' : '已关闭',
+                        '播放间隔显示字幕',
                         style: TextStyle(
                           fontSize: 16,
                           color: isDark
@@ -1097,46 +1144,6 @@ class TingjianAppState extends State<TingjianApp>
                         ),
                       ),
                     ],
-                  ),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
-                    child: isDelaySubtitleDisplay
-                        ? Padding(
-                            padding: const EdgeInsets.only(top: 24),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                _buildDelayBtn(Icons.remove, () {
-                                  if (subtitlePauseDuration > 1) {
-                                    setState(() => subtitlePauseDuration--);
-                                    saveSettings();
-                                    setSheetState(() {});
-                                  }
-                                }, isDark),
-                                SizedBox(
-                                  width: 100,
-                                  child: Text(
-                                    '${subtitlePauseDuration}s',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontSize: 32,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFFA855F7),
-                                    ),
-                                  ),
-                                ),
-                                _buildDelayBtn(Icons.add, () {
-                                  if (subtitlePauseDuration < 60) {
-                                    setState(() => subtitlePauseDuration++);
-                                    saveSettings();
-                                    setSheetState(() {});
-                                  }
-                                }, isDark),
-                              ],
-                            ),
-                          )
-                        : const SizedBox.shrink(),
                   ),
                 ],
               ),
