@@ -536,13 +536,18 @@ class TingjianAppState extends State<TingjianApp>
     cancelSubtitleTimer();
     final gen = ++_playGeneration;
     if (_audioHandler.isAudioSourceSet) {
+      // 必须在 await seek 之前更新字幕显示状态：调用方（如 playNextSubtitle）
+      // 已先 setState 改了 currentSubtitleIndex，若隐藏放在 seek 之后，
+      // seek 让出执行权时 Flutter 会先用"新索引 + 旧 shouldShowSubtitle=true"
+      // 渲染一帧，造成新字幕闪现。同步合并到同一帧即可消除闪烁。
+      _audioHandler.updateDisplaySubtitle(isDelaySubtitleDisplay ? '' : subtitle.text);
+      if (mounted) {
+        setState(() {
+          shouldShowSubtitle = !isDelaySubtitleDisplay;
+        });
+      }
       await _audioHandler.seek(subtitle.startTime);
       if (gen != _playGeneration || !_audioHandler.isAudioSourceSet) return;
-      _audioHandler.updateDisplaySubtitle(isDelaySubtitleDisplay ? '' : subtitle.text);
-      if (!mounted) return;
-      setState(() {
-        shouldShowSubtitle = !isDelaySubtitleDisplay;
-      });
       await _audioHandler.play();
       // play() 是长生命周期 Future，resolve 时可能已开始新导航；
       // 此处之后不应有依赖当前字幕状态的代码
