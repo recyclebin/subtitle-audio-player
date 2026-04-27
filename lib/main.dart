@@ -150,6 +150,13 @@ class TingjianAppState extends State<TingjianApp>
     // 若在暂停时重置则会误触发 onSubtitleEnd，导致 isPlaying=false 时
     // 延迟计时器到期后无法推进，且 _isSubtitleEndCalled 变 true 永久压制后续触发。
     if (playing && !isPlaying) _isSubtitleEndCalled = false;
+    // 用户暂停（应用内或通知栏）时让任何挂起的播放链失效。
+    // 延迟暂停期间，timer 刚触发的 playAudioFromSubtitle 可能已经过 seek，
+    // 此时若用户点暂停，pause 完成后 await seek resolve，gen 检查仍会通过，
+    // _audioHandler.play() 接着把音频重新放出来——表现为"点暂停后图标仍是
+    // 暂停但音频继续播放"。beginInterval 不调 updateIsPlaying，不会走到这里，
+    // 所以正常的字幕间隔→自动续播链不受影响。
+    if (!playing) ++_playGeneration;
     setState(() {
       isPlaying = playing;
     });
@@ -172,12 +179,20 @@ class TingjianAppState extends State<TingjianApp>
   }
 
   Future<void> onSubtitleEnd() async {
-    // 用 realPause 而非 pause：realPause 不改变 isPlaying，
-    // 使计时器到期后能通过 isPlaying 判断用户意图决定是否继续播放
+    // 用 beginInterval 而非 pause：beginInterval 不改变 isPlaying，
+    // 使计时器到期后能通过 isPlaying 判断用户意图决定是否继续播放。
     if (!isPlaying) return;
-    await _audioHandler.realPause();
+    final endTime = subtitles[currentSubtitleIndex].endTime;
+    final intervalMs = (playInterval * 1000).round();
+    final dur = _audioHandler.audioDuration;
+    // 默认走软静音（setVolume(0)）；末句距文件尾不足 intervalMs 时退回真暂停，
+    // 否则音频在 timer fire 前先撞到 ProcessingState.completed，notification
+    // 会闪一下"已结束"。极少数情况下 duration 还没解出来 (null)，保守走 hard。
+    final hasRoom = dur != null &&
+        (dur - endTime).inMilliseconds >= intervalMs;
+    await _audioHandler.beginInterval(hardPause: !hasRoom);
     if (!mounted) return;
-    // realPause 让出执行权期间用户可能按了播放：handler.play() 会把
+    // beginInterval 让出执行权期间用户可能按了播放：handler.play() 会把
     // _isDelayPaused 清回 false。此时若继续往下走会调度新 timer，
     // 在用户想听当前句的时候把音频跳到下一句。
     if (!_audioHandler.isDelayPaused) return;
@@ -190,7 +205,6 @@ class TingjianAppState extends State<TingjianApp>
     }
     _subtitleDelayTimer?.cancel();
     final timerGen = ++_timerGeneration;
-    final intervalMs = (playInterval * 1000).round();
     _subtitleDelayTimer = Timer(Duration(milliseconds: intervalMs), () {
       if (mounted && isPlaying && timerGen == _timerGeneration) {
         playNextSubtitle();

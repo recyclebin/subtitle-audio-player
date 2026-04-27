@@ -59,10 +59,18 @@ class MyAudioHandler extends BaseAudioHandler {
       // 上一句/下一句在展开视图中仍可见。
       androidCompactActionIndices: const [0],
       playing: isPlaying,
+      // buffering 全部映射成 ready：本地文件切下一句时
+      // _audioPlayer.seek() 会让 just_audio 走 ready → buffering → ready，
+      // Samsung One UI 的 MediaStyle 在 buffering 期间会把 action 按钮
+      // 重渲染成空白（短暂消失再回来），视觉上就是"切下一句前按钮闪一下"。
+      // 本地文件 seek 引发的 buffering 是几十毫秒的瞬态，对用户没意义，
+      // 直接 squash 成 ready 让通知保持稳定。
+      // 代价：将来若接网络流，真正的缓冲也不再显示 spinner——
+      // 当前 app 只读本地文件，可接受。
       processingState: {
         ProcessingState.idle: AudioProcessingState.idle,
         ProcessingState.loading: AudioProcessingState.loading,
-        ProcessingState.buffering: AudioProcessingState.buffering,
+        ProcessingState.buffering: AudioProcessingState.ready,
         ProcessingState.ready: AudioProcessingState.ready,
         ProcessingState.completed: AudioProcessingState.completed,
       }[_audioPlayer.processingState] ?? AudioProcessingState.idle,
@@ -113,7 +121,11 @@ class MyAudioHandler extends BaseAudioHandler {
     // 切换音频源时清掉延迟暂停标志，否则上一句 2 秒规则会把新音频
     // 的已播时长误判为 0（main.dart playPreviousSubtitle）。
     _isDelayPaused = false;
+    // 顺序：先换源，再恢复音量。
+    // 反过来的话，旧源若仍在播放（间隔静音期换文件），setVolume(1)
+    // 会先把旧 drift 位置爆一下再卸载。换源后新源未播放，volume=1 安全。
     await _audioPlayer.setAudioSource(source);
+    await _audioPlayer.setVolume(1.0);
     // 新音频源加载可能重置 just_audio 的 speed，重新应用记忆值。
     // 1.0 是默认值，省一次 platform 调用。
     if (_desiredSpeed != 1.0) {
@@ -146,6 +158,9 @@ class MyAudioHandler extends BaseAudioHandler {
     if (_audioPlayer.audioSource == null) return;
     cancelTimer?.call();
     _isDelayPaused = false;
+    // 退出间隔静音期：如果是从 beginInterval 的 setVolume(0) 状态进入这里，
+    // 必须先把音量恢复，否则音频继续静音播放。无论是否处于间隔，幂等安全。
+    await _audioPlayer.setVolume(1.0);
     // updateIsPlaying 必须在 await _audioPlayer.play() 之前调用。
     // just_audio 的 play() 是长生命周期 Future，仅在音频停止时才 resolve；
     // 若放在 await 之后，整个播放期间 isPlaying 将始终为 false。
@@ -163,24 +178,36 @@ class MyAudioHandler extends BaseAudioHandler {
   Future<void> pause() async {
     cancelTimer?.call();
     _isDelayPaused = false;
+    // 顺序：先 _audioPlayer.pause()，再 setVolume(1)。
+    // 反过来的话，间隔静音期被外部 pause 打断时，setVolume(1) 会让
+    // drift 位置（下一句中段）的音频在 _audioPlayer.pause() 真正停下来前
+    // 全音量爆一下。停了再恢复音量，下一次 play() 仍能从 1.0 起播。
     await _audioPlayer.pause();
+    await _audioPlayer.setVolume(1.0);
     updateIsPlaying(false);
   }
 
-  /// 字幕间隔期专用暂停：音频暂停但不改变 isPlaying，
-  /// 使延迟计时器到期后能通过 isPlaying 判断是否自动播放下一句。
-  /// 依赖 just_audio 的保证：调用 pause() 会令当前挂起的 play() Future resolve，
-  /// 从而解除 MyAudioHandler.play() 中的 await 阻塞。
+  /// 字幕间隔期入口：默认走"软静音"路径（`setVolume(0)`），音频继续播放但不出声。
+  /// 这样外部组件（系统 MediaSession、蓝牙耳机、focus 仲裁等）观察到的
+  /// 是"音频持续输出"，不会触发"无声 → 自动 pause / focus 转移"那类启发式，
+  /// 也顺带把 iOS 锁屏 / 控制中心的"灰掉的播放按钮"问题解掉
+  /// （audio session 输出未中断 → Now Playing 不会推断成 Paused）。
   ///
-  /// 已知不一致：iOS 锁屏 / 控制中心间隔期会显示灰掉的不可点播放图标。
-  /// 这是因为 iOS Now Playing 除了读 MPNowPlayingPlaybackState，还会观察
-  /// AVAudioSession 实际输出，pause() 让音频断流就会被推断成 Paused，
-  /// 而我们没注册 playCommand 所以呈灰态。修复需要 setVolume hack 或更复杂方案，
-  /// 权衡后接受这点不一致——Android 间隔期暂停按钮可点行为不变。
-  Future<void> realPause() async {
+  /// `hardPause: true` 退回真暂停（旧 `realPause` 行为），用于"末句到文件尾
+  /// 距离不足 intervalMs"这种没有静音余量可走的情形——再不停就要撞 completed。
+  ///
+  /// `_isDelayPaused = true` 跟之前语义一致：标记我们处于间隔窗口，
+  /// 让 `playPreviousSubtitle` 的 2 秒规则能识别这种"已听完但 position 越过 endTime"
+  /// 的状态、`_updatePlayingState` 不在间隔期被错误地清 generation 等。
+  Future<void> beginInterval({bool hardPause = false}) async {
     _isDelayPaused = true;
-    await _audioPlayer.pause();
-    _updateMediaControls();
+    if (hardPause) {
+      await _audioPlayer.pause();
+    } else {
+      // setVolume(0)：position 仍前进、playerState 仍 playing，
+      // _playerStateSub 不会被触发推一次重复 playbackState，避免抖动。
+      await _audioPlayer.setVolume(0);
+    }
   }
 
   /// 设置播放速度。无音频源时只记录值，避免 platform 端在未初始化时
@@ -199,13 +226,24 @@ class MyAudioHandler extends BaseAudioHandler {
   Future<void> stop() async {
     cancelTimer?.call();
     _isDelayPaused = false;
+    // 同 pause()：先 stop 让音频停下，再恢复音量，避免间隔静音期 stop 时爆音。
     await _audioPlayer.stop();
+    await _audioPlayer.setVolume(1.0);
     updateIsPlaying(false);
   }
 
   @override
-  Future<void> seek(Duration position) async =>
-      await _audioPlayer.seek(position);
+  Future<void> seek(Duration position) async {
+    // 顺序至关重要——先 seek 再 setVolume(1)。
+    // 间隔期音频飘到 endTime+intervalMs，这位置经常落在下一句的中段。
+    // 如果反过来（先 setVolume 再 seek），seek 命令真正生效前的几毫秒里，
+    // 音频会以原 drift 位置（下一句中段）全音量出声——典型表现是
+    // "下一句开头被爆出一截杂音"。
+    // 先 seek 让 buffering 接住静默期、落到新 startTime 后再开音量，
+    // 代价是新句子开头可能被吃掉极少数 ms（不可闻，远好于爆音）。
+    await _audioPlayer.seek(position);
+    await _audioPlayer.setVolume(1.0);
+  }
 
   @override
   Future<void> skipToNext() async {
