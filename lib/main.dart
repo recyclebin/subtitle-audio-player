@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' show Random, max;
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
@@ -94,6 +95,13 @@ class TingjianAppState extends State<TingjianApp>
   }
 
   Future<void> _initAudioService() async {
+    // iOS 必需：把 AVAudioSession 类别设为 .playback（speech 预设包含此项）。
+    // audio_service 0.18+ 不再自动配置音频会话，缺这步则 iOS 默认 ambient
+    // 类别，锁屏 / 控制中心不会显示 Now Playing 控件，且 app 退后台后音频
+    // 会被系统静音。Android 上此调用为无操作。
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration.speech());
+
     _audioHandler = await AudioService.init(
       builder: () => MyAudioHandler(),
       config: const AudioServiceConfig(

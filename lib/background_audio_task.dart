@@ -27,6 +27,9 @@ class MyAudioHandler extends BaseAudioHandler {
   // 用户期望的播放速度。just_audio 在切换音频源后可能重置 speed，
   // 需要在 setAudioSource 中重新应用这个值。
   double _desiredSpeed = 1.0;
+  // 当前音频文件名。MediaItem.title 在字幕显示时会被覆写为字幕文本，
+  // 这里单独保留文件名供 updateDisplaySubtitle 复原"无字幕"态使用。
+  String? _filename;
 
   bool get isAudioSourceSet => _audioPlayer.audioSource != null;
   bool get isDelayPaused => _isDelayPaused;
@@ -65,9 +68,10 @@ class MyAudioHandler extends BaseAudioHandler {
       }[_audioPlayer.processingState] ?? AudioProcessingState.idle,
       updatePosition: _audioPlayer.position,
       bufferedPosition: _audioPlayer.bufferedPosition,
-      // 延迟暂停期间音频实际未在输出，speed 上报 0 以阻止 MediaSession
-      // 按内部时钟把通知栏 position 继续外推。
-      speed: _isDelayPaused ? 0.0 : _audioPlayer.speed,
+      // 延迟暂停期间不下报 speed:0：iOS 锁屏 / 控制中心会把 playing:true+speed:0
+      // 渲染成灰掉的不可点播放按钮，与 Android 上的"暂停可点"行为不一致。
+      // 代价：Android 大尺寸通知栏 / Auto 在 0.5–5s 间隔内进度条会前进一点点。
+      speed: _audioPlayer.speed,
     ));
   }
 
@@ -83,19 +87,29 @@ class MyAudioHandler extends BaseAudioHandler {
     });
   }
 
-  // 更新通知栏字幕文字：text 非空时以字幕为主标题、文件名为副标题；
-  // text 为空时两者均置 null，回退到 MediaItem.title（文件名）显示。
+  // 更新通知栏 / 锁屏 / 控制中心的字幕文字。
+  // 用 title/artist（双端通用：Android 通知栏渲染、iOS MPNowPlayingInfoCenter
+  // 都读这两个字段），不用 displayTitle/displaySubtitle（Android-only，iOS 不读）。
+  // text 非空：title=字幕、artist=文件名；text 为空：title=文件名、artist=null。
   void updateDisplaySubtitle(String text) {
     final item = mediaItem.value;
-    if (item == null) return;
-    mediaItem.add(item.copyWith(
-      displayTitle: text.isNotEmpty ? text : null,
-      displaySubtitle: text.isNotEmpty ? item.title : null,
+    final filename = _filename;
+    if (item == null || filename == null) return;
+    // 用 MediaItem 构造而非 copyWith：copyWith 把 null 视为"保持原值"，
+    // 没法把 artist 清回 null。
+    mediaItem.add(MediaItem(
+      id: item.id,
+      title: text.isNotEmpty ? text : filename,
+      artist: text.isNotEmpty ? filename : null,
+      duration: item.duration,
     ));
   }
 
   Future<void> setAudioSource(AudioSource source, [MediaItem? item]) async {
-    if (item != null) mediaItem.add(item);
+    if (item != null) {
+      _filename = item.title;
+      mediaItem.add(item);
+    }
     // 切换音频源时清掉延迟暂停标志，否则上一句 2 秒规则会把新音频
     // 的已播时长误判为 0（main.dart playPreviousSubtitle）。
     _isDelayPaused = false;
@@ -153,10 +167,16 @@ class MyAudioHandler extends BaseAudioHandler {
     updateIsPlaying(false);
   }
 
-  /// 字幕延迟模式专用暂停：音频静音但不改变 isPlaying，
+  /// 字幕间隔期专用暂停：音频暂停但不改变 isPlaying，
   /// 使延迟计时器到期后能通过 isPlaying 判断是否自动播放下一句。
   /// 依赖 just_audio 的保证：调用 pause() 会令当前挂起的 play() Future resolve，
   /// 从而解除 MyAudioHandler.play() 中的 await 阻塞。
+  ///
+  /// 已知不一致：iOS 锁屏 / 控制中心间隔期会显示灰掉的不可点播放图标。
+  /// 这是因为 iOS Now Playing 除了读 MPNowPlayingPlaybackState，还会观察
+  /// AVAudioSession 实际输出，pause() 让音频断流就会被推断成 Paused，
+  /// 而我们没注册 playCommand 所以呈灰态。修复需要 setVolume hack 或更复杂方案，
+  /// 权衡后接受这点不一致——Android 间隔期暂停按钮可点行为不变。
   Future<void> realPause() async {
     _isDelayPaused = true;
     await _audioPlayer.pause();

@@ -1,6 +1,6 @@
 # 听见 (tingjian)
 
-字幕音频播放器，专为听力精听训练设计。
+字幕音频播放器，专为听力精听训练设计。Android / iOS 双端支持。
 
 ## 主要功能
 
@@ -8,17 +8,18 @@
 - 按字幕条目逐句导航：上一句 / 下一句 / 单句循环 / 随机播放
 - **播放间隔**：每句播完自动暂停 0.5–5 秒（步进 0.5）后跳下一句；可选「播放间隔显示字幕」——开启时仅在间隔时显示字幕，关闭时全程显示，专为精听训练设计
 - 变速播放（0.5x / 0.75x / 1x / 1.25x / 1.5x / 1.75x / 2x）
-- Android 通知栏 / 锁屏控制（播放、上一句、下一句）
+- 系统媒体控件：Android 通知栏、iOS 锁屏 / 控制中心 Now Playing（播放、上一句、下一句、当前字幕显示）
 - 自动恢复上次会话（音频、字幕、当前位置、所有设置）
 
 ## 开发
 
 ```bash
-# 调试运行
+# 调试运行（自动选已连接设备 / 模拟器）
 flutter run
 
-# 构建发布 APK
-flutter build apk --release
+# 构建发布版
+flutter build apk --release   # Android
+flutter build ipa --release   # iOS（需 macOS + Xcode + 开发者签名）
 
 # 静态检查
 flutter analyze
