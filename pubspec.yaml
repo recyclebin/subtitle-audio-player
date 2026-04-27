@@ -9,7 +9,10 @@ dependencies:
   flutter:
     sdk: flutter
   just_audio: ^0.10.5
-  audio_service: ^0.18.12
+  # 精确钉版：MyAudioHandler.dispose() 不是 @override（BaseAudioHandler 当前没有
+  # 这个方法）。若 audio_service 在小版本里加了 dispose，override 契约会悄悄破裂，
+  # 须人工核对再升级。
+  audio_service: 0.18.18
   audio_session: ^0.2.0
   file_picker: ^11.0.2
   path: ^1.8.3

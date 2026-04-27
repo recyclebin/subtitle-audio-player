@@ -11,9 +11,13 @@ class Subtitle {
       {required this.startTime, required this.endTime, required this.text});
 }
 
+// 顶层 RegExp 常量：每行解析时复用，避免在循环里反复构造。
+final _htmlTagPattern = RegExp(r'<[^>]*>');
+final _seqLinePattern = RegExp(r'^\d+$');
+final _leadingDigitsPattern = RegExp(r'^\d+');
+
 String _removeHtmlTags(String text) {
-  final regExp = RegExp(r'<[^>]*>');
-  return text.replaceAll(regExp, '');
+  return text.replaceAll(_htmlTagPattern, '');
 }
 
 String _decodeHtmlEntities(String text) {
@@ -49,13 +53,16 @@ Future<List<Subtitle>> parseSrtFile(String filePath) async {
     line = line.trim();
 
     if (line.isEmpty && newSubtitleLine) {
-      if (end > start) {
-        subtitles.add(Subtitle(
-            startTime: start, endTime: end, text: textBuffer.toString().trim()));
+      // 与时间戳行分支保持一致：要求文本非空才提交，避免空字幕混入列表
+      if (textBuffer.isNotEmpty && end > start) {
+        final text = textBuffer.toString().trim();
+        if (text.isNotEmpty) {
+          subtitles.add(Subtitle(startTime: start, endTime: end, text: text));
+        }
       }
       textBuffer.clear();
       newSubtitleLine = false;
-    } else if (RegExp(r'^\d+$').hasMatch(line)) {
+    } else if (_seqLinePattern.hasMatch(line)) {
       // 行号行，标记下一行起始；先于 --> 检查，防止纯数字误判
       newSubtitleLine = true;
     } else if (line.contains('-->')) {
@@ -70,10 +77,11 @@ Future<List<Subtitle>> parseSrtFile(String filePath) async {
         final newEnd = _parseDuration(timestamps[1].trim());
         // 缺少空行分隔符时 textBuffer 可能还有上一个有效块的内容，先 flush
         if (textBuffer.isNotEmpty && end > start) {
-          subtitles.add(Subtitle(
-              startTime: start,
-              endTime: end,
-              text: textBuffer.toString().trim()));
+          final text = textBuffer.toString().trim();
+          if (text.isNotEmpty) {
+            subtitles.add(
+                Subtitle(startTime: start, endTime: end, text: text));
+          }
           textBuffer.clear();
         }
         start = newStart;
@@ -91,8 +99,10 @@ Future<List<Subtitle>> parseSrtFile(String filePath) async {
 
   // 文件末尾可能没有空行，手动收尾；end <= start 说明时间戳从未被正确解析，跳过
   if (textBuffer.isNotEmpty && end > start) {
-    subtitles.add(Subtitle(
-        startTime: start, endTime: end, text: textBuffer.toString().trim()));
+    final text = textBuffer.toString().trim();
+    if (text.isNotEmpty) {
+      subtitles.add(Subtitle(startTime: start, endTime: end, text: text));
+    }
   }
 
   return subtitles;
@@ -121,7 +131,7 @@ Duration _parseDuration(String timestamp) {
   final int milliseconds;
   if (sepIndex >= 0) {
     // 取分隔符后的纯数字前缀，忽略非标准 SRT 中可能附加的位置标记（如 " align:left"）
-    final msRaw = RegExp(r'^\d+').stringMatch(secondsPart.substring(sepIndex + 1)) ?? '';
+    final msRaw = _leadingDigitsPattern.stringMatch(secondsPart.substring(sepIndex + 1)) ?? '';
     if (msRaw.isEmpty) throw FormatException('字幕时间戳格式错误：$timestamp');
     final msNormalized = msRaw.padRight(3, '0').substring(0, 3);
     milliseconds = int.tryParse(msNormalized) ??

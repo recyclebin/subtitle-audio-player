@@ -177,6 +177,10 @@ class TingjianAppState extends State<TingjianApp>
     if (!isPlaying) return;
     await _audioHandler.realPause();
     if (!mounted) return;
+    // realPause 让出执行权期间用户可能按了播放：handler.play() 会把
+    // _isDelayPaused 清回 false。此时若继续往下走会调度新 timer，
+    // 在用户想听当前句的时候把音频跳到下一句。
+    if (!_audioHandler.isDelayPaused) return;
     if (isDelaySubtitleDisplay) {
       // 播放期间字幕被隐藏，间隔开始时揭示
       setState(() {
@@ -249,8 +253,14 @@ class TingjianAppState extends State<TingjianApp>
         lastAudioFilePath.isNotEmpty &&
         lastSubtitleFilePath != null &&
         lastSubtitleFilePath.isNotEmpty) {
-      if (await File(lastAudioFilePath).exists() &&
-          await File(lastSubtitleFilePath).exists()) {
+      final audioExists = await File(lastAudioFilePath).exists();
+      final subtitleExists = await File(lastSubtitleFilePath).exists();
+      if (!audioExists || !subtitleExists) {
+        // 文件已被删除/移动：清掉残留键，下次冷启动直接显示「请选择文件」，
+        // 避免每次启动都白白做一次 File.exists 检查。
+        await prefs.remove('lastAudioFilePath');
+        await prefs.remove('lastSubtitleFilePath');
+      } else {
         try {
           subtitles = await parseSrtFile(lastSubtitleFilePath);
           if (subtitles.isEmpty) throw Exception('字幕文件为空');
@@ -320,7 +330,8 @@ class TingjianAppState extends State<TingjianApp>
   }
 
   /// 1.0 → "1"；0.75 → "0.75"。给整数去掉 ".0" 让 UI 更紧凑。
-  String _formatSpeed(double s) {
+  /// 速度（0.25 步进）和播放间隔（0.5 步进）都用它，故名 step 而非 speed。
+  String _formatStep(double s) {
     return s == s.roundToDouble() ? '${s.toInt()}' : '$s';
   }
 
@@ -839,14 +850,14 @@ class TingjianAppState extends State<TingjianApp>
                               children: [
                                 _buildActionItem(
                                   icon: Icons.speed_rounded,
-                                  label: '${_formatSpeed(playbackSpeed)}x',
+                                  label: '${_formatStep(playbackSpeed)}x',
                                   isActive: playbackSpeed != 1.0,
                                   onTap: _isInitialized ? _showSpeedSheet : null,
                                   isDark: isDark,
                                 ),
                                 _buildActionItem(
                                   icon: Icons.timer_outlined,
-                                  label: '${_formatSpeed(playInterval)}s',
+                                  label: '${_formatStep(playInterval)}s',
                                   isActive: isDelaySubtitleDisplay,
                                   onTap: _isInitialized ? _showDelaySheet : null,
                                   isDark: isDark,
@@ -858,9 +869,10 @@ class TingjianAppState extends State<TingjianApp>
                                   onTap: _isInitialized
                                       ? () {
                                           setState(() {
-                                            if (!isRandomPlay) {
-                                              playedSubtitlesIndices.clear();
-                                            }
+                                            // 进、出随机模式都清空历史：
+                                            // 残留历史会让下次开启随机时
+                                            // 「上一句」回溯到上一会话的索引，体感意外。
+                                            playedSubtitlesIndices.clear();
                                             isRandomPlay = !isRandomPlay;
                                           });
                                           saveSettings();
@@ -1051,7 +1063,7 @@ class TingjianAppState extends State<TingjianApp>
                   SizedBox(
                     width: 100,
                     child: Text(
-                      '${_formatSpeed(playbackSpeed)}x',
+                      '${_formatStep(playbackSpeed)}x',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 32,
@@ -1102,7 +1114,7 @@ class TingjianAppState extends State<TingjianApp>
                       SizedBox(
                         width: 100,
                         child: Text(
-                          '${_formatSpeed(playInterval)}s',
+                          '${_formatStep(playInterval)}s',
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 32,
