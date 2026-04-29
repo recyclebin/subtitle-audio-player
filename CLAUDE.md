@@ -23,11 +23,15 @@ flutter test test/widget_test.dart
 
 ## Architecture
 
-The app has three Dart source files:
+The app has five Dart source files across two subdirectories:
 
-**`lib/main.dart`** — The entire UI and playback coordination layer. `TingjianAppState` owns all application state: subtitle list, current index, play mode flags (`isRandomPlay`, `isLoopSingle`, `isDelaySubtitleDisplay`), playback speed, and the subtitle delay timer. It drives the `MyAudioHandler` and reacts to position updates via `positionStream`.
+**`lib/main.dart`** — State management and playback coordination. `TingjianAppState` owns all application state: subtitle list, current index, play mode flags (`isRandomPlay`, `isLoopSingle`, `isDelaySubtitleDisplay`), playback speed, and the subtitle delay timer. It drives the `MyAudioHandler` and reacts to position updates via `positionStream`. The `build()` method assembles data and delegates to `PlayerScreen`.
 
-**`lib/background_audio_task.dart`** — `MyAudioHandler` extends `BaseAudioHandler` from `audio_service`. It wraps `just_audio`'s `AudioPlayer` and bridges it to the Android media notification. Key design points:
+**`lib/widgets/player_screen.dart`** — All UI. `PlayerScreen` (the main screen), `PlayBtn`, `ActionItem`, `SheetShell`, `DelayBtn`, `SpeedSheet`, `DelaySheet`, plus the `formatStep` utility. All widgets are `StatelessWidget`s that receive data and callbacks via constructor — no `setState`.
+
+**`lib/services/settings_service.dart`** — `SettingsData` (pure data class for all persisted fields) and `SettingsService` (static `load`/`save`/`clearFilePaths`/`quantizeSpeed`/`quantizeInterval`). Encapsulates all `SharedPreferences` access.
+
+**`lib/services/background_audio_task.dart`** — `MyAudioHandler` extends `BaseAudioHandler` from `audio_service`. It wraps `just_audio`'s `AudioPlayer` and bridges it to the Android media notification. Key design points:
 - `isPlaying` in the handler reflects *user intent* (not actual audio output). `beginInterval()` enters the silent gap between subtitles via `setVolume(0)` (audio keeps streaming, just inaudible) without clearing `isPlaying`, so the delay timer can auto-advance after the reveal period ends.
 - The interval uses `setVolume(0)` rather than truly pausing because real `pause()` causes a 2–3s gap of audible silence that some systems (Samsung MediaSession heuristics, Bluetooth auto-pause, audio focus arbitration, etc.) interpret as "playback should stop", and respond by sending an unsolicited `pause()` → `play()` cycle through the handler. Keeping audio playing inaudibly keeps the audio focus held continuously and avoids those interventions. It also resolves the prior iOS lock-screen "grayed-out play icon" issue since `AVAudioSession` output is never interrupted.
 - Edge case: when the last subtitle's `endTime` is within `intervalMs` of the file `duration`, `beginInterval(hardPause: true)` is used — the soft path would let audio reach `ProcessingState.completed` mid-interval and flicker the notification.
@@ -36,7 +40,7 @@ The app has three Dart source files:
 - On `setAudioSource`, a brief `playing: true` emission to `playbackState` is immediately followed by `_updateMediaControls()` to force Android's foreground service to start (so the notification appears without requiring the user to press play).
 - Callbacks (`onSkipToNext`, `onSkipToPrevious`, `cancelTimer`, `updatePlayingStateCallback`) are set by the widget after `AudioService.init()` and cleared in `dispose()`.
 
-**`lib/subtitle_parser.dart`** — Parses `.srt` files with auto charset detection (`flutter_charset_detector`). Handles missing sequence numbers, missing blank-line separators, both `,` and `.` as millisecond separators, and HTML tags/entities in subtitle text.
+**`lib/services/subtitle_parser.dart`** — Parses `.srt` files with auto charset detection (`flutter_charset_detector`). Handles missing sequence numbers, missing blank-line separators, both `,` and `.` as millisecond separators, and HTML tags/entities in subtitle text.
 
 ## Subtitle Delay Feature
 

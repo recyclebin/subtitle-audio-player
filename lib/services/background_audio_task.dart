@@ -19,9 +19,9 @@ class MyAudioHandler extends BaseAudioHandler {
   Future<void> Function()? onSkipToPrevious;
   void Function()? cancelTimer;
   // isPlaying 表示用户可见的播放意图，而非底层音频是否真正在输出声音。
-  // realPause() 暂停音频时不会改变此值，使延迟计时器能正确判断是否自动推进。
+  // beginInterval() 暂停音频时不会改变此值，使延迟计时器能正确判断是否自动推进。
   bool isPlaying = false;
-  // 字幕延迟模式下音频播放到字幕结束点后由 realPause() 置为 true，
+  // 字幕延迟模式下音频播放到字幕结束点后由 beginInterval() 置为 true，
   // 用于区分"延迟暂停"与用户手动暂停，影响通知栏播放状态的显示。
   bool _isDelayPaused = false;
   // 用户期望的播放速度。just_audio 在切换音频源后可能重置 speed，
@@ -241,8 +241,13 @@ class MyAudioHandler extends BaseAudioHandler {
     // "下一句开头被爆出一截杂音"。
     // 先 seek 让 buffering 接住静默期、落到新 startTime 后再开音量，
     // 代价是新句子开头可能被吃掉极少数 ms（不可闻，远好于爆音）。
-    await _audioPlayer.seek(position);
-    await _audioPlayer.setVolume(1.0);
+    try {
+      await _audioPlayer.seek(position);
+    } finally {
+      // seek 失败（音频源已释放、文件被删等）也必须恢复音量，
+      // 否则间隔静音期的 volume=0 会让后续所有播放永久静音。
+      await _audioPlayer.setVolume(1.0);
+    }
   }
 
   @override
