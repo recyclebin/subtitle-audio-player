@@ -99,8 +99,12 @@ class AssessmentHistoryService {
         final lines = await entity.readAsLines();
         for (final line in lines) {
           if (line.trim().isEmpty) continue;
-          final json = jsonDecode(line) as Map<String, dynamic>;
-          records.add(AssessmentRecord.fromJson(json));
+          try {
+            final json = jsonDecode(line) as Map<String, dynamic>;
+            records.add(AssessmentRecord.fromJson(json));
+          } catch (_) {
+            // Skip corrupted lines
+          }
         }
       }
     }

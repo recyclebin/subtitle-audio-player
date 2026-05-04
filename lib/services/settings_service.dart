@@ -10,6 +10,7 @@ class SettingsData {
   final int currentSubtitleIndex;
   final double playbackSpeed;
   final List<int> playedSubtitlesIndices;
+  final int assessmentMode; // 0 = afterSubtitle, 1 = karaoke
 
   const SettingsData({
     this.lastAudioFilePath,
@@ -21,6 +22,7 @@ class SettingsData {
     this.currentSubtitleIndex = 0,
     this.playbackSpeed = 1.0,
     this.playedSubtitlesIndices = const [],
+    this.assessmentMode = 0,
   });
 }
 
@@ -40,6 +42,7 @@ class SettingsService {
           .map((i) => int.tryParse(i))
           .whereType<int>()
           .toList(),
+      assessmentMode: prefs.getInt('assessmentMode') ?? 0,
     );
   }
 
@@ -64,6 +67,7 @@ class SettingsService {
       await prefs.setDouble('playbackSpeed', s.playbackSpeed);
       await prefs.setStringList('playedSubtitlesIndices',
           s.playedSubtitlesIndices.map((i) => i.toString()).toList());
+      await prefs.setInt('assessmentMode', s.assessmentMode);
     } catch (e) {
       // saveSettings 在多处被无 await 调用；静默吞掉写入失败
     }
