@@ -12,6 +12,11 @@ import 'package:path/path.dart' as path;
 import 'services/background_audio_task.dart';
 import 'services/subtitle_parser.dart';
 import 'services/settings_service.dart';
+import 'services/pronunciation_service.dart';
+import 'services/assessment_history_service.dart';
+import 'models/assessment_result.dart';
+import 'widgets/pronunciation_score_card.dart';
+import 'widgets/history_list_view.dart';
 import 'widgets/player_screen.dart';
 
 void main() => runApp(const MyApp());
@@ -73,6 +78,9 @@ class TingjianAppState extends State<TingjianApp>
   int _timerGeneration = 0;
   Timer? _saveSettingsDebounce;
   bool _isInitialized = false;
+  PronunciationService? _pronService;
+  AssessmentHistoryService? _historyService;
+  int _assessmentMode = 0;
   bool _isPicking = false;
 
   @override
@@ -111,6 +119,11 @@ class TingjianAppState extends State<TingjianApp>
         await _loadSettings();
       } catch (e) {
         debugPrint('恢复设置失败: $e');
+      }
+      try {
+        await _initPronunciationServices();
+      } catch (e) {
+        debugPrint('初始化发音评估服务失败: $e');
       }
     } catch (e) {
       debugPrint('初始化音频服务失败: $e');
@@ -192,6 +205,7 @@ class TingjianAppState extends State<TingjianApp>
         playInterval = s.playInterval;
         currentSubtitleIndex = s.currentSubtitleIndex;
         playbackSpeed = s.playbackSpeed;
+        _assessmentMode = s.assessmentMode;
         playedSubtitlesIndices = s.playedSubtitlesIndices;
       });
     }
@@ -251,6 +265,7 @@ class TingjianAppState extends State<TingjianApp>
         currentSubtitleIndex: currentSubtitleIndex,
         playbackSpeed: playbackSpeed,
         playedSubtitlesIndices: playedSubtitlesIndices,
+        assessmentMode: _assessmentMode,
       );
 
   Future<void> _saveSettings() async {
@@ -616,6 +631,137 @@ class TingjianAppState extends State<TingjianApp>
     );
   }
 
+  Future<void> _initPronunciationServices() async {
+    const key = '';
+    const region = 'eastasia';
+    if (key.isEmpty) return;
+    _pronService = PronunciationService(subscriptionKey: key, region: region);
+    _historyService = await AssessmentHistoryService.create();
+  }
+
+  Future<void> _startAssessment() async {
+    if (_pronService == null) return;
+    if (subtitles.isEmpty || currentSubtitleIndex >= subtitles.length) return;
+
+    if (_assessmentMode == 0) {
+      if (isPlaying) {
+        await _audioHandler.pause();
+      }
+    }
+
+    try {
+      final hasPerm = await _pronService!.checkPermission();
+      if (!hasPerm) {
+        if (mounted) {
+          _showMicPermissionDialog();
+        }
+        return;
+      }
+      await _pronService!.startRecording();
+    } catch (e) {
+      debugPrint('开始录音失败: $e');
+    }
+  }
+
+  Future<void> _stopAssessment() async {
+    if (_pronService == null) return;
+    if (subtitles.isEmpty || currentSubtitleIndex >= subtitles.length) return;
+
+    final referenceText = subtitles[currentSubtitleIndex].text;
+
+    try {
+      final result = await _pronService!.stopAndAssess(referenceText);
+      if (_assessmentMode == 0) {
+        await _audioHandler.play();
+      }
+      if (_historyService != null) {
+        final record = AssessmentRecord(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          audioFilePath: audioFilePath ?? '',
+          subtitleIndex: currentSubtitleIndex,
+          result: result,
+          timestamp: DateTime.now(),
+        );
+        await _historyService!.append(record);
+      }
+      if (mounted) {
+        _showScoreCard(result);
+      }
+    } on AssessmentException catch (e) {
+      if (_assessmentMode == 0) {
+        await _audioHandler.play();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+      }
+    } catch (e) {
+      if (_assessmentMode == 0) {
+        await _audioHandler.play();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('评估失败，请重试')),
+        );
+      }
+    }
+  }
+
+  void _showMicPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('需要麦克风权限'),
+        content: const Text('请在系统设置中允许麦克风权限后重试。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showScoreCard(AssessmentResult result) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => PronunciationScoreCard(
+        result: result,
+        isDark: isDark,
+        onClose: () => Navigator.of(context).pop(),
+      ),
+    );
+  }
+
+  Future<void> _openHistory() async {
+    if (_historyService == null) return;
+    final groups = await _historyService!.loadByFile();
+    if (!mounted) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HistoryListView(
+          fileGroups: groups,
+          isDark: isDark,
+          onViewResult: (result) {
+            _showScoreCard(result);
+          },
+        ),
+      ),
+    );
+  }
+
+  void _toggleAssessmentMode() {
+    setState(() {
+      _assessmentMode = _assessmentMode == 0 ? 1 : 0;
+    });
+    _saveSettings();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -677,6 +823,17 @@ class TingjianAppState extends State<TingjianApp>
             }
           : null,
       onFileTap: _isInitialized ? pickAudioFileAndFindSubtitle : null,
+      assessmentMode: _assessmentMode,
+      onStartRecording: (_isInitialized && isFileLoaded && _pronService != null)
+          ? _startAssessment
+          : null,
+      onStopRecording: (_isInitialized && isFileLoaded && _pronService != null)
+          ? _stopAssessment
+          : null,
+      onToggleAssessmentMode: _isInitialized ? _toggleAssessmentMode : null,
+      onOpenHistory: (_isInitialized && _historyService != null)
+          ? _openHistory
+          : null,
     );
   }
 }

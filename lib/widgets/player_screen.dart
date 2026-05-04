@@ -2,6 +2,8 @@ import 'dart:math' show max;
 
 import 'package:flutter/material.dart';
 
+import 'pronunciation_overlay.dart';
+
 /// 1.0 → "1"；0.75 → "0.75"。
 String formatStep(double s) {
   return s == s.roundToDouble() ? '${s.toInt()}' : '$s';
@@ -379,6 +381,12 @@ class PlayerScreen extends StatelessWidget {
 
   final VoidCallback? onFileTap;
 
+  final int assessmentMode;
+  final VoidCallback? onStartRecording;
+  final Future<void> Function()? onStopRecording;
+  final VoidCallback? onToggleAssessmentMode;
+  final VoidCallback? onOpenHistory;
+
   const PlayerScreen({
     super.key,
     required this.isDark,
@@ -405,6 +413,11 @@ class PlayerScreen extends StatelessWidget {
     required this.isLoopActive,
     this.onLoopTap,
     this.onFileTap,
+    required this.assessmentMode,
+    this.onStartRecording,
+    this.onStopRecording,
+    this.onToggleAssessmentMode,
+    this.onOpenHistory,
   });
 
   @override
@@ -482,29 +495,44 @@ class PlayerScreen extends StatelessWidget {
                             : Colors.white.withValues(alpha: 0.55),
                         borderRadius: BorderRadius.circular(28),
                       ),
-                      child: Center(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 28, vertical: 28),
-                          child: Text(
-                            shouldShowSubtitle ? currentSubtitle : '',
-                            style: TextStyle(
-                              fontSize: 30,
-                              height: 1.85,
-                              fontWeight: FontWeight.w300,
-                              letterSpacing: 0.3,
-                              color: shouldShowSubtitle
-                                  ? (isDark
-                                      ? Colors.white.withValues(alpha: 0.92)
-                                      : const Color(0xFF1E0A3C))
-                                  : (isDark
-                                      ? Colors.white.withValues(alpha: 0.08)
-                                      : const Color(0xFF1E0A3C)
-                                          .withValues(alpha: 0.10)),
+                      child: Stack(
+                        children: [
+                          Center(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 28, vertical: 28),
+                              child: Text(
+                                shouldShowSubtitle ? currentSubtitle : '',
+                                style: TextStyle(
+                                  fontSize: 30,
+                                  height: 1.85,
+                                  fontWeight: FontWeight.w300,
+                                  letterSpacing: 0.3,
+                                  color: shouldShowSubtitle
+                                      ? (isDark
+                                          ? Colors.white.withValues(alpha: 0.92)
+                                          : const Color(0xFF1E0A3C))
+                                      : (isDark
+                                          ? Colors.white.withValues(alpha: 0.08)
+                                          : const Color(0xFF1E0A3C)
+                                              .withValues(alpha: 0.10)),
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
-                            textAlign: TextAlign.center,
                           ),
-                        ),
+                          Positioned(
+                            top: 12,
+                            right: 12,
+                            child: PronunciationOverlay(
+                              isDark: isDark,
+                              isInitialized: isInitialized,
+                              isFileLoaded: isFileLoaded,
+                              onStartRecording: onStartRecording ?? () {},
+                              onStopRecording: onStopRecording ?? () async {},
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -599,6 +627,22 @@ class PlayerScreen extends StatelessWidget {
                                   label: '循环',
                                   isActive: isLoopActive,
                                   onTap: onLoopTap,
+                                  isDark: isDark,
+                                ),
+                                ActionItem(
+                                  icon: assessmentMode == 0
+                                      ? Icons.mic_off_rounded
+                                      : Icons.mic_rounded,
+                                  label: assessmentMode == 0 ? '暂停后读' : '跟读',
+                                  isActive: assessmentMode != 0,
+                                  onTap: onToggleAssessmentMode,
+                                  isDark: isDark,
+                                ),
+                                ActionItem(
+                                  icon: Icons.history_rounded,
+                                  label: '历史',
+                                  isActive: false,
+                                  onTap: onOpenHistory,
                                   isDark: isDark,
                                 ),
                                 ActionItem(
