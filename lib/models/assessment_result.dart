@@ -15,7 +15,16 @@ class AssessmentResult {
     Map<String, dynamic> json,
     String referenceText,
   ) {
-    final nbest = (json['NBest'] as List).first as Map<String, dynamic>;
+    final nbestList = json['NBest'] as List?;
+    if (nbestList == null || nbestList.isEmpty) {
+      return AssessmentResult(
+        referenceText: referenceText,
+        recognizedText: '',
+        overallScore: 0,
+        words: [],
+      );
+    }
+    final nbest = nbestList.first as Map<String, dynamic>;
     final recognizedText = nbest['Lexical'] as String? ?? '';
     final pa = nbest['PronunciationAssessment'] as Map<String, dynamic>? ?? {};
     final overallScore = (pa['AccuracyScore'] as num?)?.toDouble() ?? 0;
@@ -36,8 +45,6 @@ class AssessmentResult {
       }
       words.add(WordResult(
         word: map['Word'] as String? ?? '',
-        recognizedWord:
-            recognizedText.isNotEmpty ? (map['Word'] as String?) : null,
         accuracyScore: (map['AccuracyScore'] as num?)?.toDouble() ?? 0,
         isOmission: errorType == 'Omission',
         isInsertion: errorType == 'Insertion',
@@ -75,7 +82,6 @@ class AssessmentResult {
 
 class WordResult {
   final String word;
-  final String? recognizedWord;
   final double accuracyScore;
   final bool isOmission;
   final bool isInsertion;
@@ -83,7 +89,6 @@ class WordResult {
 
   const WordResult({
     required this.word,
-    this.recognizedWord,
     required this.accuracyScore,
     required this.isOmission,
     required this.isInsertion,
@@ -92,7 +97,6 @@ class WordResult {
 
   Map<String, dynamic> toJson() => {
         'word': word,
-        'recognizedWord': recognizedWord,
         'accuracyScore': accuracyScore,
         'isOmission': isOmission,
         'isInsertion': isInsertion,
@@ -103,7 +107,6 @@ class WordResult {
     final phonemesJson = (json['phonemes'] as List?) ?? [];
     return WordResult(
       word: json['word'] as String? ?? '',
-      recognizedWord: json['recognizedWord'] as String?,
       accuracyScore: (json['accuracyScore'] as num?)?.toDouble() ?? 0,
       isOmission: json['isOmission'] as bool? ?? false,
       isInsertion: json['isInsertion'] as bool? ?? false,

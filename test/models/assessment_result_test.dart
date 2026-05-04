@@ -99,15 +99,68 @@ void main() {
       expect(result.words[0].isOmission, true);
     });
 
+    test('fromAzureResponse detects insertion words', () {
+      final jsonWithInsertion = {
+        'NBest': [
+          {
+            'Lexical': 'hello extra',
+            'Words': [
+              {
+                'Word': 'hello',
+                'AccuracyScore': 90.0,
+                'ErrorType': null,
+                'Phonemes': [],
+              },
+              {
+                'Word': 'extra',
+                'AccuracyScore': 0.0,
+                'ErrorType': 'Insertion',
+                'Phonemes': [],
+              },
+            ],
+          }
+        ]
+      };
+
+      final result = AssessmentResult.fromAzureResponse(
+        jsonWithInsertion,
+        'hello',
+      );
+
+      expect(result.words[1].isInsertion, true);
+    });
+
+    test('fromAzureResponse handles empty NBest gracefully', () {
+      final result = AssessmentResult.fromAzureResponse(
+        {'NBest': []},
+        'hello',
+      );
+
+      expect(result.referenceText, 'hello');
+      expect(result.recognizedText, '');
+      expect(result.overallScore, 0);
+      expect(result.words, isEmpty);
+    });
+
+    test('fromAzureResponse handles null NBest gracefully', () {
+      final result = AssessmentResult.fromAzureResponse(
+        {},
+        'hello',
+      );
+
+      expect(result.referenceText, 'hello');
+      expect(result.overallScore, 0);
+      expect(result.words, isEmpty);
+    });
+
     test('toJson and fromJson roundtrip preserves data', () {
-      final original = AssessmentResult(
+      final original = const AssessmentResult(
         referenceText: 'test',
         recognizedText: 'test',
         overallScore: 85.0,
         words: [
           WordResult(
             word: 'test',
-            recognizedWord: 'test',
             accuracyScore: 85.0,
             isOmission: false,
             isInsertion: false,
