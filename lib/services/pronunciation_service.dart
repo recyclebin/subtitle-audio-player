@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 
@@ -9,6 +11,8 @@ import '../models/assessment_result.dart';
 enum AssessmentMode { afterSubtitle, karaoke }
 
 class PronunciationService {
+  static const _minAudioFileSize = 1600; // ~0.1s of 16kHz mono WAV
+
   final String subscriptionKey;
   final String region;
   final AudioRecorder _recorder;
@@ -25,8 +29,11 @@ class PronunciationService {
     required String referenceText,
     required String language,
   }) {
-    final escaped = referenceText.replaceAll('"', r'\"');
-    return '{"ReferenceText":"$escaped","GradingSystem":"FivePoint","Granularity":"Phoneme"}';
+    return jsonEncode({
+      'ReferenceText': referenceText,
+      'GradingSystem': 'FivePoint',
+      'Granularity': 'Phoneme',
+    });
   }
 
   String detectLanguage(String text) {
@@ -44,9 +51,10 @@ class PronunciationService {
 
   bool _inRange(int code, int low, int high) => code >= low && code <= high;
 
-  Future<bool> get hasPermission async => await _recorder.hasPermission();
+  Future<bool> checkPermission() async => await _recorder.hasPermission();
 
   Future<void> startRecording() async {
+    debugPrint('PronunciationService: starting recording');
     await _recorder.start(
       const RecordConfig(
         encoder: AudioEncoder.wav,
@@ -72,7 +80,7 @@ class PronunciationService {
     }
 
     final fileSize = await file.length();
-    if (fileSize < 1600) {
+    if (fileSize < _minAudioFileSize) {
       await file.delete();
       throw const AssessmentException('录音太短，请重试');
     }
@@ -81,16 +89,22 @@ class PronunciationService {
 
     try {
       final bytes = await file.readAsBytes();
-      final response = await http.post(
-        Uri.parse('$_baseUrl?language=$lang'),
-        headers: {
-          'Ocp-Apim-Subscription-Key': subscriptionKey,
-          'Content-Type': 'audio/wav; codecs=audio/pcm; samplerate=16000',
-          'Pronunciation-Assessment':
-              buildAssessmentConfig(referenceText: referenceText, language: lang),
-        },
-        body: bytes,
-      );
+
+      debugPrint('PronunciationService: calling Azure API (${bytes.length} bytes)');
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl?language=$lang'),
+            headers: {
+              'Ocp-Apim-Subscription-Key': subscriptionKey,
+              'Content-Type': 'audio/wav; codecs=audio/pcm; samplerate=16000',
+              'Pronunciation-Assessment':
+                  buildAssessmentConfig(referenceText: referenceText, language: lang),
+            },
+            body: bytes,
+          )
+          .timeout(const Duration(seconds: 15));
+
+      debugPrint('PronunciationService: HTTP ${response.statusCode}');
 
       if (response.statusCode != 200) {
         throw AssessmentException('评估失败，请检查网络 (${response.statusCode})');
@@ -103,6 +117,14 @@ class PronunciationService {
       }
 
       return AssessmentResult.fromAzureResponse(json, referenceText);
+    } on SocketException catch (e) {
+      throw AssessmentException('网络连接失败 (${e.message})');
+    } on TimeoutException {
+      throw const AssessmentException('请求超时，请检查网络');
+    } on HttpException catch (e) {
+      throw AssessmentException('服务器错误 (${e.message})');
+    } on FormatException {
+      throw const AssessmentException('评估失败，服务器返回异常数据');
     } finally {
       if (await file.exists()) {
         await file.delete();
