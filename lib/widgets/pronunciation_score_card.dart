@@ -337,8 +337,9 @@ class _WordChipState extends State<_WordChip> {
                 color: Colors.black.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 2,
                 children: word.phonemes.map((p) {
                   final hasName = p.phoneme.isNotEmpty;
                   return Padding(
