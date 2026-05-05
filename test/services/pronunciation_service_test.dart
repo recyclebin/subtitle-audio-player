@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tingjian/services/pronunciation_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('PronunciationService', () {
     late PronunciationService service;
 

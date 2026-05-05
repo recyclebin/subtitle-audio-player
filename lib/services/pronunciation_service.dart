@@ -15,12 +15,13 @@ class PronunciationService {
 
   final String subscriptionKey;
   final String region;
-  final AudioRecorder _recorder;
+  AudioRecorder? __recorder;
+  AudioRecorder get _recorder => __recorder ??= AudioRecorder();
 
   PronunciationService({
     required this.subscriptionKey,
     required this.region,
-  }) : _recorder = AudioRecorder();
+  });
 
   String get _baseUrl =>
       'https://$region.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1';
