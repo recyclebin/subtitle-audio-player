@@ -43,6 +43,7 @@ class PronunciationScoreCard extends StatefulWidget {
 class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
   int _countdown = 0;
   Timer? _timer;
+  bool? _expandAll;
 
   @override
   void initState() {
@@ -110,56 +111,57 @@ class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  '${widget.result.overallScore.round()}',
-                  style: TextStyle(
-                    fontSize: 56,
-                    fontWeight: FontWeight.w700,
-                    color: scoreColor(widget.result.overallScore),
-                  ),
-                ),
-                Text(
-                  '发音得分',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: widget.isDark
-                        ? Colors.white.withValues(alpha: 0.50)
-                        : const Color(0xFF2E1065).withValues(alpha: 0.50),
-                  ),
-                ),
                 const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: widget.isDark
-                        ? Colors.white.withValues(alpha: 0.06)
-                        : const Color(0xFF2E1065).withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.language_rounded,
-                          size: 14,
-                          color: widget.isDark
-                              ? Colors.white.withValues(alpha: 0.45)
-                              : const Color(0xFF2E1065).withValues(alpha: 0.45)),
-                      const SizedBox(width: 6),
-                      Text(
-                        languageName(widget.result.language),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: widget.isDark
-                              ? Colors.white.withValues(alpha: 0.55)
-                              : const Color(0xFF2E1065).withValues(alpha: 0.55),
-                        ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${widget.result.overallScore.round()}',
+                      style: TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.w700,
+                        color: scoreColor(widget.result.overallScore),
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 14),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '发音得分',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: widget.isDark
+                                ? Colors.white.withValues(alpha: 0.45)
+                                : const Color(0xFF2E1065).withValues(alpha: 0.45),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: widget.isDark
+                                ? Colors.white.withValues(alpha: 0.06)
+                                : const Color(0xFF2E1065).withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            languageName(widget.result.language),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: widget.isDark
+                                  ? Colors.white.withValues(alpha: 0.45)
+                                  : const Color(0xFF2E1065).withValues(alpha: 0.45),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
                 Expanded(
                   child: Container(
                     width: double.infinity,
@@ -170,31 +172,60 @@ class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
                           : const Color(0xFFF6F4FB),
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '逐词评估',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: widget.isDark
-                                  ? Colors.white.withValues(alpha: 0.60)
-                                  : const Color(0xFF2E1065).withValues(alpha: 0.60),
+                    child: ScrollbarTheme(
+                        data: ScrollbarThemeData(
+                          thumbVisibility: WidgetStateProperty.all(true),
+                        ),
+                        child: Scrollbar(
+                        child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  '逐词评估',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: widget.isDark
+                                        ? Colors.white.withValues(alpha: 0.60)
+                                        : const Color(0xFF2E1065).withValues(alpha: 0.60),
+                                  ),
+                                ),
+                                const Spacer(),
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: GestureDetector(
+                                    onTap: () => setState(() {
+                                      _expandAll = _expandAll == true ? false : true;
+                                    }),
+                                    child: Text(
+                                      _expandAll == true ? '全部收起' : '全部展开',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: widget.isDark
+                                            ? Colors.white.withValues(alpha: 0.40)
+                                            : const Color(0xFF2E1065).withValues(alpha: 0.40),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: widget.result.words.map((w) {
-                              return _WordChip(word: w);
-                            }).toList(),
-                          ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: widget.result.words.map((w) {
+                                return _WordChip(word: w, expandAll: _expandAll);
+                              }).toList(),
+                            ),
                         ],
                       ),
+                    ),
+                    ),
                     ),
                   ),
                 ),
@@ -232,7 +263,8 @@ class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
 
 class _WordChip extends StatefulWidget {
   final WordResult word;
-  const _WordChip({required this.word});
+  final bool? expandAll;
+  const _WordChip({required this.word, this.expandAll});
 
   @override
   State<_WordChip> createState() => _WordChipState();
@@ -240,6 +272,14 @@ class _WordChip extends StatefulWidget {
 
 class _WordChipState extends State<_WordChip> {
   bool _expanded = false;
+
+  @override
+  void didUpdateWidget(covariant _WordChip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.expandAll != oldWidget.expandAll && widget.expandAll != null) {
+      _expanded = widget.expandAll!;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

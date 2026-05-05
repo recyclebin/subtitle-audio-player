@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_langdetect/flutter_langdetect.dart' as langdetect;
 import 'package:record/record.dart';
 
 import '../models/assessment_result.dart';
@@ -114,46 +115,48 @@ class PronunciationService {
     return base64Encode(utf8.encode(json));
   }
 
-  String detectLanguage(String text) {
-    if (text.isEmpty) return 'en-US';
+  static bool _initialized = false;
 
-    bool hasAccented = false;
-    bool hasFrench = false;
-    bool hasPortuguese = false;
-    bool hasSpanish = false;
-
-    for (final code in text.runes) {
-      if (_inRange(code, 0x4E00, 0x9FFF) || _inRange(code, 0x3400, 0x4DBF)) {
-        return 'zh-CN';
-      }
-      if (_inRange(code, 0x3040, 0x309F) || _inRange(code, 0x30A0, 0x30FF)) {
-        return 'ja-JP';
-      }
-      if (_inRange(code, 0xAC00, 0xD7AF)) return 'ko-KR';
-
-      if (code > 0x007F) hasAccented = true;
-
-      // Spanish: ñ (U+00F1), ¿ (U+00BF), ¡ (U+00A1)
-      if (code == 0x00F1 || code == 0x00BF || code == 0x00A1) hasSpanish = true;
-      // Portuguese: ã (U+00E3), õ (U+00F5)
-      if (code == 0x00E3 || code == 0x00F5) hasPortuguese = true;
-      // French: ù (U+00F9), û (U+00FB), î (U+00EE), ï (U+00EF),
-      //         ë (U+00EB), è (U+00E8), œ (U+0153), æ (U+00E6)
-      if (code == 0x00F9 || code == 0x00FB || code == 0x00EE ||
-          code == 0x00EF || code == 0x00EB || code == 0x00E8 ||
-          code == 0x0153 || code == 0x00E6) {
-        hasFrench = true;
-      }
-    }
-
-    if (hasSpanish) return 'es-ES';
-    if (hasPortuguese) return 'pt-PT';
-    if (hasFrench) return 'fr-FR';
-    if (hasAccented) return 'fr-FR'; // accented Latin w/o stronger marker → French
-    return 'en-US';
+  static Future<void> initLanguageDetector() async {
+    if (_initialized) return;
+    await langdetect.initLangDetect();
+    _initialized = true;
   }
 
-  bool _inRange(int code, int low, int high) => code >= low && code <= high;
+  static String detectLanguage(String text) {
+    if (text.isEmpty) return 'en-US';
+
+    // Fast Unicode pre-check for scripts unambiguous by character range
+    for (final code in text.runes) {
+      if (_inRange(code, 0x4E00, 0x9FFF) || _inRange(code, 0x3400, 0x4DBF)) return 'zh-CN';
+      if (_inRange(code, 0x3040, 0x309F) || _inRange(code, 0x30A0, 0x30FF)) return 'ja-JP';
+      if (_inRange(code, 0xAC00, 0xD7AF)) return 'ko-KR';
+      if (_inRange(code, 0x0E00, 0x0E7F)) return 'th-TH';
+    }
+
+    // N-gram statistical model for Latin-script languages
+    try {
+      final iso = langdetect.detect(text);
+      return _isoToBcp47(iso);
+    } catch (_) {
+      return 'en-US';
+    }
+  }
+
+  static String _isoToBcp47(String iso) => switch (iso) {
+        'en' => 'en-US',
+        'fr' => 'fr-FR',
+        'es' => 'es-ES',
+        'pt' => 'pt-PT',
+        'zh-cn' => 'zh-CN',
+        'zh-tw' => 'zh-CN',
+        'ja' => 'ja-JP',
+        'ko' => 'ko-KR',
+        'th' => 'th-TH',
+        _ => 'en-US',
+      };
+
+  static bool _inRange(int code, int low, int high) => code >= low && code <= high;
 
   Future<bool> checkPermission() async => await _recorder.hasPermission();
 
