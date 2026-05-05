@@ -8,6 +8,10 @@ void main() {
   group('PronunciationService', () {
     late PronunciationService service;
 
+    setUpAll(() async {
+      await PronunciationService.initLanguageDetector();
+    });
+
     setUp(() {
       service = PronunciationService(
         subscriptionKey: 'test-key',
@@ -43,47 +47,43 @@ void main() {
 
     group('detectLanguage', () {
       test('returns en-US for English text', () {
-        expect(service.detectLanguage('hello'), 'en-US');
+        expect(PronunciationService.detectLanguage('the weather is beautiful today and I would like to go for a walk'), 'en-US');
       });
 
       test('returns zh-CN for Chinese text', () {
-        expect(service.detectLanguage('你好世界'), 'zh-CN');
+        expect(PronunciationService.detectLanguage('你好世界'), 'zh-CN');
       });
 
       test('returns ja-JP for Japanese text', () {
-        expect(service.detectLanguage('こんにちは'), 'ja-JP');
+        expect(PronunciationService.detectLanguage('こんにちは'), 'ja-JP');
       });
 
       test('returns ko-KR for Korean text', () {
-        expect(service.detectLanguage('안녕하세요'), 'ko-KR');
+        expect(PronunciationService.detectLanguage('안녕하세요'), 'ko-KR');
       });
 
       test('returns en-US for empty string', () {
-        expect(service.detectLanguage(''), 'en-US');
+        expect(PronunciationService.detectLanguage(''), 'en-US');
       });
 
       test('returns en-US for digits', () {
-        expect(service.detectLanguage('123'), 'en-US');
+        expect(PronunciationService.detectLanguage('123'), 'en-US');
       });
 
       test('returns es-ES for Spanish text', () {
-        expect(service.detectLanguage('¿Cómo estás?'), 'es-ES');
-        expect(service.detectLanguage('mañana'), 'es-ES');
+        expect(PronunciationService.detectLanguage('Buenos días, cómo estás hoy hace muy buen tiempo para pasear'), 'es-ES');
       });
 
       test('returns pt-PT for Portuguese text', () {
-        expect(service.detectLanguage('não'), 'pt-PT');
-        expect(service.detectLanguage('informações'), 'pt-PT');
+        expect(PronunciationService.detectLanguage('Bom dia, como você está hoje o tempo está muito bom para passear'), 'pt-PT');
       });
 
       test('returns fr-FR for French text', () {
-        expect(service.detectLanguage('très bien'), 'fr-FR');
-        expect(service.detectLanguage('naïf'), 'fr-FR');
+        expect(PronunciationService.detectLanguage('Bonjour, comment allez-vous aujourd\'hui il fait très beau pour se promener'), 'fr-FR');
       });
 
-      test('returns en-US for plain Latin text without markers', () {
-        expect(service.detectLanguage('hello world'), 'en-US');
-        expect(service.detectLanguage('cafe'), 'en-US');
+      test('returns en-US for plain English text', () {
+        expect(PronunciationService.detectLanguage('hello world how are you doing today'), 'en-US');
       });
     });
   });

@@ -3,19 +3,20 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_langdetect/flutter_langdetect.dart' as langdetect;
 import 'package:record/record.dart';
 
 import '../models/assessment_result.dart';
 
 enum AssessmentMode { afterSubtitle, karaoke }
 
-/// Extract raw PCM data from a WAV file, handling non-standard headers.
-/// Returns null if the file is not valid WAV/PCM.
+/// 从 WAV 中提取原始 PCM 数据，兼容非标准 RIFF 头部。
+/// 返回 null 表示文件不是有效 WAV/PCM。
 Uint8List? _extractPcmFromWav(Uint8List bytes) {
   if (bytes.length < 44) return null;
   final data = ByteData.sublistView(bytes);
 
-  // Verify RIFF header
+  // 校验 RIFF 头部
   if (data.getUint8(0) != 0x52 || // R
       data.getUint8(1) != 0x49 || // I
       data.getUint8(2) != 0x46 || // F
@@ -28,7 +29,7 @@ Uint8List? _extractPcmFromWav(Uint8List bytes) {
     return null;
   }
 
-  // Walk chunks to find "data"
+  // 遍历 chunk 找到 "data" 块
   var offset = 12;
   while (offset + 8 <= bytes.length) {
     final chunkId = String.fromCharCodes(bytes.sublist(offset, offset + 4));
@@ -43,7 +44,8 @@ Uint8List? _extractPcmFromWav(Uint8List bytes) {
   return null;
 }
 
-/// Build a minimal 44-byte WAV header around raw 16-bit mono PCM data.
+/// 根据原始 16-bit 单声道 PCM 数据构建最小 44 字节 WAV 头部。
+/// 确保无论录音设备生成何种头部格式，Azure 都能正确解析。
 Uint8List _buildMinimalWav(Uint8List pcm) {
   final dataSize = pcm.length;
   final fileSize = 36 + dataSize; // RIFF size = fileSize - 8
@@ -114,46 +116,56 @@ class PronunciationService {
     return base64Encode(utf8.encode(json));
   }
 
-  String detectLanguage(String text) {
-    if (text.isEmpty) return 'en-US';
+  static bool _initialized = false;
 
-    bool hasAccented = false;
-    bool hasFrench = false;
-    bool hasPortuguese = false;
-    bool hasSpanish = false;
-
-    for (final code in text.runes) {
-      if (_inRange(code, 0x4E00, 0x9FFF) || _inRange(code, 0x3400, 0x4DBF)) {
-        return 'zh-CN';
-      }
-      if (_inRange(code, 0x3040, 0x309F) || _inRange(code, 0x30A0, 0x30FF)) {
-        return 'ja-JP';
-      }
-      if (_inRange(code, 0xAC00, 0xD7AF)) return 'ko-KR';
-
-      if (code > 0x007F) hasAccented = true;
-
-      // Spanish: ñ (U+00F1), ¿ (U+00BF), ¡ (U+00A1)
-      if (code == 0x00F1 || code == 0x00BF || code == 0x00A1) hasSpanish = true;
-      // Portuguese: ã (U+00E3), õ (U+00F5)
-      if (code == 0x00E3 || code == 0x00F5) hasPortuguese = true;
-      // French: ù (U+00F9), û (U+00FB), î (U+00EE), ï (U+00EF),
-      //         ë (U+00EB), è (U+00E8), œ (U+0153), æ (U+00E6)
-      if (code == 0x00F9 || code == 0x00FB || code == 0x00EE ||
-          code == 0x00EF || code == 0x00EB || code == 0x00E8 ||
-          code == 0x0153 || code == 0x00E6) {
-        hasFrench = true;
-      }
-    }
-
-    if (hasSpanish) return 'es-ES';
-    if (hasPortuguese) return 'pt-PT';
-    if (hasFrench) return 'fr-FR';
-    if (hasAccented) return 'fr-FR'; // accented Latin w/o stronger marker → French
-    return 'en-US';
+  /// 初始化 n-gram 语种检测模型（55 种语言）。
+  /// 在 main() 中调用一次即可，重复调用自动跳过。
+  static Future<void> initLanguageDetector() async {
+    if (_initialized) return;
+    await langdetect.initLangDetect();
+    _initialized = true;
   }
 
-  bool _inRange(int code, int low, int high) => code >= low && code <= high;
+  /// 检测文本语种，返回 Azure 所需的 BCP-47 代码。
+  ///
+  /// 两层策略：
+  /// 1. Unicode 区间预检：CJK / 泰文等字符集明确的语言直接返回，无需统计模型；
+  /// 2. N-gram 统计模型：拉丁字母系语言（英/法/西/葡等）由 flutter_langdetect 判定。
+  static String detectLanguage(String text) {
+    if (text.isEmpty) return 'en-US';
+
+    // Fast Unicode pre-check for scripts unambiguous by character range
+    for (final code in text.runes) {
+      if (_inRange(code, 0x4E00, 0x9FFF) || _inRange(code, 0x3400, 0x4DBF)) return 'zh-CN';
+      if (_inRange(code, 0x3040, 0x309F) || _inRange(code, 0x30A0, 0x30FF)) return 'ja-JP';
+      if (_inRange(code, 0xAC00, 0xD7AF)) return 'ko-KR';
+      if (_inRange(code, 0x0E00, 0x0E7F)) return 'th-TH';
+    }
+
+    // 拉丁字母系语言：交给 n-gram 统计模型
+    try {
+      final iso = langdetect.detect(text);
+      return _isoToBcp47(iso);
+    } catch (_) {
+      return 'en-US';
+    }
+  }
+
+  /// 将 flutter_langdetect 返回的 ISO 639-1 代码映射为 Azure 所需的 BCP-47 语种标签。
+  static String _isoToBcp47(String iso) => switch (iso) {
+        'en' => 'en-US',
+        'fr' => 'fr-FR',
+        'es' => 'es-ES',
+        'pt' => 'pt-PT',
+        'zh-cn' => 'zh-CN',
+        'zh-tw' => 'zh-CN',
+        'ja' => 'ja-JP',
+        'ko' => 'ko-KR',
+        'th' => 'th-TH',
+        _ => 'en-US',
+      };
+
+  static bool _inRange(int code, int low, int high) => code >= low && code <= high;
 
   Future<bool> checkPermission() async => await _recorder.hasPermission();
 

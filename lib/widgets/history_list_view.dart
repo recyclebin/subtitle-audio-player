@@ -101,17 +101,24 @@ class HistoryListView extends StatelessWidget {
                 ),
               ),
             )
-          : ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              itemCount: entries.length,
-              itemBuilder: (context, index) {
-                final entry = entries[index];
-                return _FileGroupCard(
-                  group: entry.value,
-                  isDark: isDark,
-                  onViewResult: onViewResult,
-                );
-              },
+          : ScrollbarTheme(
+              data: ScrollbarThemeData(
+                thumbVisibility: WidgetStateProperty.all(true),
+              ),
+              child: Scrollbar(
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                itemCount: entries.length,
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  return _FileGroupCard(
+                    group: entry.value,
+                    isDark: isDark,
+                    onViewResult: onViewResult,
+                  );
+                },
+              ),
+              ),
             ),
     );
   }
