@@ -412,8 +412,6 @@ class _SubScores extends StatelessWidget {
       _ScoreItem('准确', result.accuracyScore),
       _ScoreItem('流利', result.fluencyScore),
       _ScoreItem('完整', result.completenessScore),
-      if (result.prosodyScore != null)
-        _ScoreItem('韵律', result.prosodyScore!),
     ];
 
     return Row(

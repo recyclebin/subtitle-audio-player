@@ -5,7 +5,6 @@ class AssessmentResult {
   final double accuracyScore;
   final double fluencyScore;
   final double completenessScore;
-  final double? prosodyScore;
   final List<WordResult> words;
   final String? language;
 
@@ -16,7 +15,6 @@ class AssessmentResult {
     this.accuracyScore = 0,
     this.fluencyScore = 0,
     this.completenessScore = 0,
-    this.prosodyScore,
     required this.words,
     this.language,
   });
@@ -42,8 +40,6 @@ class AssessmentResult {
     final accuracyScore = (nbest['AccuracyScore'] as num?)?.toDouble() ?? 0;
     final fluencyScore = (nbest['FluencyScore'] as num?)?.toDouble() ?? 0;
     final completenessScore = (nbest['CompletenessScore'] as num?)?.toDouble() ?? 0;
-    // ProsodyScore 可能是 flat number，也可能是 {"Score": 85} 嵌套对象
-    final prosodyRaw = _parseMaybeNested(nbest['ProsodyScore']);
 
     final wordsJson = (nbest['Words'] as List?) ?? [];
     final words = <WordResult>[];
@@ -75,7 +71,6 @@ class AssessmentResult {
       accuracyScore: accuracyScore,
       fluencyScore: fluencyScore,
       completenessScore: completenessScore,
-      prosodyScore: prosodyRaw,
       words: words,
       language: language,
     );
@@ -88,21 +83,9 @@ class AssessmentResult {
         'accuracyScore': accuracyScore,
         'fluencyScore': fluencyScore,
         'completenessScore': completenessScore,
-        if (prosodyScore != null) 'prosodyScore': prosodyScore,
         'words': words.map((w) => w.toJson()).toList(),
         if (language != null) 'language': language,
       };
-
-  /// Azure 某些字段可能为 flat number 或 `{"Score": N}` 嵌套对象，统一处理。
-  static double? _parseMaybeNested(dynamic value) {
-    if (value == null) return null;
-    if (value is num) return value.toDouble();
-    if (value is Map<String, dynamic>) {
-      final nested = value['Score'] as num?;
-      return nested?.toDouble();
-    }
-    return null;
-  }
 
   factory AssessmentResult.fromJson(Map<String, dynamic> json) {
     final wordsJson = (json['words'] as List?) ?? [];
@@ -114,7 +97,6 @@ class AssessmentResult {
       fluencyScore: (json['fluencyScore'] as num?)?.toDouble() ?? 0,
       completenessScore:
           (json['completenessScore'] as num?)?.toDouble() ?? 0,
-      prosodyScore: (json['prosodyScore'] as num?)?.toDouble(),
       words: wordsJson
           .map((w) => WordResult.fromJson(w as Map<String, dynamic>))
           .toList(),
