@@ -11,6 +11,8 @@ class SettingsData {
   final double playbackSpeed;
   final List<int> playedSubtitlesIndices;
   final int assessmentMode; // 0 = afterSubtitle, 1 = karaoke
+  final String? azureSubscriptionKey;
+  final String? azureRegion;
 
   const SettingsData({
     this.lastAudioFilePath,
@@ -23,6 +25,8 @@ class SettingsData {
     this.playbackSpeed = 1.0,
     this.playedSubtitlesIndices = const [],
     this.assessmentMode = 0,
+    this.azureSubscriptionKey,
+    this.azureRegion,
   });
 }
 
@@ -43,6 +47,8 @@ class SettingsService {
           .whereType<int>()
           .toList(),
       assessmentMode: prefs.getInt('assessmentMode') ?? 0,
+      azureSubscriptionKey: prefs.getString('azureSubscriptionKey'),
+      azureRegion: prefs.getString('azureRegion'),
     );
   }
 
@@ -68,6 +74,16 @@ class SettingsService {
       await prefs.setStringList('playedSubtitlesIndices',
           s.playedSubtitlesIndices.map((i) => i.toString()).toList());
       await prefs.setInt('assessmentMode', s.assessmentMode);
+      if (s.azureSubscriptionKey != null && s.azureSubscriptionKey!.isNotEmpty) {
+        await prefs.setString('azureSubscriptionKey', s.azureSubscriptionKey!);
+      } else {
+        await prefs.remove('azureSubscriptionKey');
+      }
+      if (s.azureRegion != null && s.azureRegion!.isNotEmpty) {
+        await prefs.setString('azureRegion', s.azureRegion!);
+      } else {
+        await prefs.remove('azureRegion');
+      }
     } catch (e) {
       // saveSettings 在多处被无 await 调用；静默吞掉写入失败
     }

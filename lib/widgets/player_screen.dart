@@ -386,6 +386,7 @@ class PlayerScreen extends StatelessWidget {
   final Future<void> Function()? onStopRecording;
   final VoidCallback? onToggleAssessmentMode;
   final VoidCallback? onOpenHistory;
+  final VoidCallback? onConfigureAzure;
 
   const PlayerScreen({
     super.key,
@@ -418,6 +419,7 @@ class PlayerScreen extends StatelessWidget {
     this.onStopRecording,
     this.onToggleAssessmentMode,
     this.onOpenHistory,
+    this.onConfigureAzure,
   });
 
   @override
@@ -643,6 +645,13 @@ class PlayerScreen extends StatelessWidget {
                                   label: '历史',
                                   isActive: false,
                                   onTap: onOpenHistory,
+                                  isDark: isDark,
+                                ),
+                                ActionItem(
+                                  icon: Icons.key_rounded,
+                                  label: 'Azure',
+                                  isActive: false,
+                                  onTap: onConfigureAzure,
                                   isDark: isDark,
                                 ),
                                 ActionItem(

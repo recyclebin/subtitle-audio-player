@@ -81,6 +81,8 @@ class TingjianAppState extends State<TingjianApp>
   PronunciationService? _pronService;
   AssessmentHistoryService? _historyService;
   int _assessmentMode = 0;
+  String? _azureKey;
+  String? _azureRegion;
   bool _isPicking = false;
 
   @override
@@ -206,6 +208,8 @@ class TingjianAppState extends State<TingjianApp>
         currentSubtitleIndex = s.currentSubtitleIndex;
         playbackSpeed = s.playbackSpeed;
         _assessmentMode = s.assessmentMode;
+        _azureKey = s.azureSubscriptionKey;
+        _azureRegion = s.azureRegion;
         playedSubtitlesIndices = s.playedSubtitlesIndices;
       });
     }
@@ -266,6 +270,8 @@ class TingjianAppState extends State<TingjianApp>
         playbackSpeed: playbackSpeed,
         playedSubtitlesIndices: playedSubtitlesIndices,
         assessmentMode: _assessmentMode,
+        azureSubscriptionKey: _azureKey,
+        azureRegion: _azureRegion,
       );
 
   Future<void> _saveSettings() async {
@@ -632,11 +638,20 @@ class TingjianAppState extends State<TingjianApp>
   }
 
   Future<void> _initPronunciationServices() async {
-    const key = '';
-    const region = 'eastasia';
+    await _tryInitPronunciationServices(
+      key: _azureKey ?? '',
+      region: _azureRegion ?? 'eastasia',
+    );
+  }
+
+  Future<void> _tryInitPronunciationServices({
+    required String key,
+    required String region,
+  }) async {
     if (key.isEmpty) return;
+    _pronService?.dispose();
     _pronService = PronunciationService(subscriptionKey: key, region: region);
-    _historyService = await AssessmentHistoryService.create();
+    _historyService ??= await AssessmentHistoryService.create();
   }
 
   Future<void> _startAssessment() async {
@@ -762,6 +777,65 @@ class TingjianAppState extends State<TingjianApp>
     _saveSettings();
   }
 
+  void _showAzureConfig() {
+    final keyController = TextEditingController(text: _azureKey ?? '');
+    final regionController = TextEditingController(text: _azureRegion ?? 'eastasia');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Azure 语音服务配置'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: keyController,
+              decoration: const InputDecoration(
+                labelText: 'Subscription Key',
+                hintText: '请输入 Azure 订阅密钥',
+                border: OutlineInputBorder(),
+              ),
+              obscureText: true,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: regionController,
+              decoration: const InputDecoration(
+                labelText: 'Region',
+                hintText: 'eastasia',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              final key = keyController.text.trim();
+              final region = regionController.text.trim();
+              if (key.isEmpty) return;
+              _configureAzure(key: key, region: region);
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _configureAzure({required String key, required String region}) {
+    _azureKey = key;
+    _azureRegion = region;
+    _saveSettings();
+    _tryInitPronunciationServices(key: key, region: region);
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -834,6 +908,7 @@ class TingjianAppState extends State<TingjianApp>
       onOpenHistory: (_isInitialized && _historyService != null)
           ? _openHistory
           : null,
+      onConfigureAzure: _isInitialized ? _showAzureConfig : null,
     );
   }
 }
