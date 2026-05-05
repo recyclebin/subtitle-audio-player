@@ -30,6 +30,8 @@ class MyAudioHandler extends BaseAudioHandler {
   // 当前音频文件名。MediaItem.title 在字幕显示时会被覆写为字幕文本，
   // 这里单独保留文件名供 updateDisplaySubtitle 复原"无字幕"态使用。
   String? _filename;
+  // 录音/评估期间锁定通知栏按钮，防止用户通过通知栏操作干扰评估流程。
+  bool _controlsLocked = false;
 
   bool get isAudioSourceSet => _audioPlayer.audioSource != null;
   bool get isDelayPaused => _isDelayPaused;
@@ -43,17 +45,27 @@ class MyAudioHandler extends BaseAudioHandler {
     _updateMediaControls();
   }
 
+  void setControlsLocked(bool locked) {
+    if (_controlsLocked == locked) return;
+    _controlsLocked = locked;
+    _updateMediaControls();
+  }
+
   void _updateMediaControls() {
     // playing 跟随 isPlaying（用户意图）而非"音频是否真在输出"：字幕延迟期间
     // 音频虽暂停，但用户认知仍在播放，需保持通知栏暂停按钮与主界面一致。
     // 若用 isPlaying && !_isDelayPaused，Android 会按 STATE_PAUSED 渲染，
     // 强制把 MediaControl.pause 图标换成播放图标。
-    playbackState.add(playbackState.value.copyWith(
-      controls: [
-        isPlaying ? MediaControl.pause : MediaControl.play,
+    // 录音/评估期间只保留播放/暂停（不提供上下句），防止用户从通知栏扰乱状态。
+    final controls = <MediaControl>[
+      isPlaying ? MediaControl.pause : MediaControl.play,
+      if (!_controlsLocked) ...[
         MediaControl.skipToPrevious,
         MediaControl.skipToNext,
       ],
+    ];
+    playbackState.add(playbackState.value.copyWith(
+      controls: controls,
       systemActions: const {},
       // 紧凑视图只显示播放/暂停，为通知标题（字幕文字）留出横向空间；
       // 上一句/下一句在展开视图中仍可见。
@@ -155,7 +167,7 @@ class MyAudioHandler extends BaseAudioHandler {
 
   @override
   Future<void> play() async {
-    if (_audioPlayer.audioSource == null) return;
+    if (_controlsLocked || _audioPlayer.audioSource == null) return;
     cancelTimer?.call();
     _isDelayPaused = false;
     // 退出间隔静音期：如果是从 beginInterval 的 setVolume(0) 状态进入这里，
@@ -252,11 +264,13 @@ class MyAudioHandler extends BaseAudioHandler {
 
   @override
   Future<void> skipToNext() async {
+    if (_controlsLocked) return;
     await onSkipToNext?.call();
   }
 
   @override
   Future<void> skipToPrevious() async {
+    if (_controlsLocked) return;
     await onSkipToPrevious?.call();
   }
 

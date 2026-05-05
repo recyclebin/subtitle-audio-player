@@ -837,6 +837,9 @@ class TingjianAppState extends State<TingjianApp>
     if (_pronService == null) return;
     if (subtitles.isEmpty || currentSubtitleIndex >= subtitles.length) return;
 
+    // 锁定通知栏按钮，防止录音期间用户从通知栏操作干扰状态
+    _audioHandler.setControlsLocked(true);
+
     // 记录评估前播放状态，以便评估结束后决定是否恢复播放
     _wasPlayingBeforeAssessment = isPlaying;
     if (isPlaying) {
@@ -846,12 +849,14 @@ class TingjianAppState extends State<TingjianApp>
     try {
       final hasPerm = await _pronService!.checkPermission();
       if (!hasPerm) {
+        _audioHandler.setControlsLocked(false);
         if (mounted) _showMicPermissionDialog();
         return;
       }
       await _pronService!.startRecording();
       _startRecordingTimers();
     } catch (e) {
+      _audioHandler.setControlsLocked(false);
       debugPrint('开始录音失败: $e');
     }
   }
@@ -881,6 +886,7 @@ class TingjianAppState extends State<TingjianApp>
         await _historyService!.append(record);
       }
       if (mounted) {
+        _audioHandler.setControlsLocked(false);
         setState(() => _isAssessing = false);
         _showScoreCard(
           result,
@@ -908,6 +914,7 @@ class TingjianAppState extends State<TingjianApp>
         );
       }
     } on AssessmentException catch (e) {
+      _audioHandler.setControlsLocked(false);
       if (mounted) setState(() => _isAssessing = false);
       if (wasFollowRead) {
         playNextSubtitle();
@@ -920,6 +927,7 @@ class TingjianAppState extends State<TingjianApp>
         );
       }
     } catch (e, st) {
+      _audioHandler.setControlsLocked(false);
       if (mounted) setState(() => _isAssessing = false);
       debugPrint('Pronunciation assessment error: $e\n$st');
       if (wasFollowRead) {
