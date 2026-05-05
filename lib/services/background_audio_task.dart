@@ -57,10 +57,12 @@ class MyAudioHandler extends BaseAudioHandler {
     // 音频虽暂停，但用户认知仍在播放，需保持通知栏暂停按钮与主界面一致。
     // 若用 isPlaying && !_isDelayPaused，Android 会按 STATE_PAUSED 渲染，
     // 强制把 MediaControl.pause 图标换成播放图标。
-    // 录音/评估期间只保留播放/暂停（不提供上下句），防止用户从通知栏扰乱状态。
+    // 录音/评估期间移除所有通知栏按钮。只隐藏上下句而保留播放/暂停
+    // 在三星 One UI 上仍会渲染为可点击态（tap 无反应），反而造成混乱。
+    // 全部移除后通知栏只展示元数据，用户只能在 app 内操作。
     final controls = <MediaControl>[
-      isPlaying ? MediaControl.pause : MediaControl.play,
       if (!_controlsLocked) ...[
+        isPlaying ? MediaControl.pause : MediaControl.play,
         MediaControl.skipToPrevious,
         MediaControl.skipToNext,
       ],
@@ -68,9 +70,8 @@ class MyAudioHandler extends BaseAudioHandler {
     playbackState.add(playbackState.value.copyWith(
       controls: controls,
       systemActions: const {},
-      // 紧凑视图只显示播放/暂停，为通知标题（字幕文字）留出横向空间；
-      // 上一句/下一句在展开视图中仍可见。
-      androidCompactActionIndices: const [0],
+      // 锁定时 controls 为空，compact indices 必须同步为空避免越界。
+      androidCompactActionIndices: controls.isEmpty ? const [] : const [0],
       playing: isPlaying,
       // buffering 全部映射成 ready：本地文件切下一句时
       // _audioPlayer.seek() 会让 just_audio 走 ready → buffering → ready，
