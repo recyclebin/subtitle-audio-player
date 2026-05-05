@@ -43,6 +43,8 @@ class PronunciationScoreCard extends StatefulWidget {
 class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
   int _countdown = 0;
   Timer? _timer;
+  /// 三态：null=未控制, true=全部展开, false=全部收起。
+  /// 用户单独点击单词后变为 null，避免切换时覆盖用户操作。
   bool? _expandAll;
 
   @override
@@ -112,6 +114,7 @@ class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
                   ),
                 ),
                 const SizedBox(height: 10),
+                // 分数与标签水平排列，节省纵向空间
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -273,6 +276,7 @@ class _WordChip extends StatefulWidget {
 class _WordChipState extends State<_WordChip> {
   bool _expanded = false;
 
+  /// 父级「全部展开/收起」变化时，同步每个词的展开状态。
   @override
   void didUpdateWidget(covariant _WordChip oldWidget) {
     super.didUpdateWidget(oldWidget);

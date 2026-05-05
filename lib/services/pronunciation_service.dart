@@ -10,13 +10,13 @@ import '../models/assessment_result.dart';
 
 enum AssessmentMode { afterSubtitle, karaoke }
 
-/// Extract raw PCM data from a WAV file, handling non-standard headers.
-/// Returns null if the file is not valid WAV/PCM.
+/// 从 WAV 中提取原始 PCM 数据，兼容非标准 RIFF 头部。
+/// 返回 null 表示文件不是有效 WAV/PCM。
 Uint8List? _extractPcmFromWav(Uint8List bytes) {
   if (bytes.length < 44) return null;
   final data = ByteData.sublistView(bytes);
 
-  // Verify RIFF header
+  // 校验 RIFF 头部
   if (data.getUint8(0) != 0x52 || // R
       data.getUint8(1) != 0x49 || // I
       data.getUint8(2) != 0x46 || // F
@@ -29,7 +29,7 @@ Uint8List? _extractPcmFromWav(Uint8List bytes) {
     return null;
   }
 
-  // Walk chunks to find "data"
+  // 遍历 chunk 找到 "data" 块
   var offset = 12;
   while (offset + 8 <= bytes.length) {
     final chunkId = String.fromCharCodes(bytes.sublist(offset, offset + 4));
@@ -44,7 +44,8 @@ Uint8List? _extractPcmFromWav(Uint8List bytes) {
   return null;
 }
 
-/// Build a minimal 44-byte WAV header around raw 16-bit mono PCM data.
+/// 根据原始 16-bit 单声道 PCM 数据构建最小 44 字节 WAV 头部。
+/// 确保无论录音设备生成何种头部格式，Azure 都能正确解析。
 Uint8List _buildMinimalWav(Uint8List pcm) {
   final dataSize = pcm.length;
   final fileSize = 36 + dataSize; // RIFF size = fileSize - 8
@@ -117,12 +118,19 @@ class PronunciationService {
 
   static bool _initialized = false;
 
+  /// 初始化 n-gram 语种检测模型（55 种语言）。
+  /// 在 main() 中调用一次即可，重复调用自动跳过。
   static Future<void> initLanguageDetector() async {
     if (_initialized) return;
     await langdetect.initLangDetect();
     _initialized = true;
   }
 
+  /// 检测文本语种，返回 Azure 所需的 BCP-47 代码。
+  ///
+  /// 两层策略：
+  /// 1. Unicode 区间预检：CJK / 泰文等字符集明确的语言直接返回，无需统计模型；
+  /// 2. N-gram 统计模型：拉丁字母系语言（英/法/西/葡等）由 flutter_langdetect 判定。
   static String detectLanguage(String text) {
     if (text.isEmpty) return 'en-US';
 
@@ -134,7 +142,7 @@ class PronunciationService {
       if (_inRange(code, 0x0E00, 0x0E7F)) return 'th-TH';
     }
 
-    // N-gram statistical model for Latin-script languages
+    // 拉丁字母系语言：交给 n-gram 统计模型
     try {
       final iso = langdetect.detect(text);
       return _isoToBcp47(iso);
@@ -143,6 +151,7 @@ class PronunciationService {
     }
   }
 
+  /// 将 flutter_langdetect 返回的 ISO 639-1 代码映射为 Azure 所需的 BCP-47 语种标签。
   static String _isoToBcp47(String iso) => switch (iso) {
         'en' => 'en-US',
         'fr' => 'fr-FR',

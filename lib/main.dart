@@ -87,6 +87,7 @@ class TingjianAppState extends State<TingjianApp>
   String? _azureKey;
   String? _azureRegion;
   bool _isFollowReadMode = false;
+  /// 评估前记录播放状态：暂停状态下触发评估，评估结束后不应自动恢复播放。
   bool _wasPlayingBeforeAssessment = false;
   bool _isRecording = false;
   int _recordingSeconds = 0;
@@ -460,6 +461,7 @@ class TingjianAppState extends State<TingjianApp>
       playedSubtitlesIndices = [];
       currentSubtitleIndex =
           isRandomPlay ? _random.nextInt(parsedSubtitles.length) : 0;
+      // 加载文件时自动检测语种（取开头 5 句字幕，仅首次自动检测，之后保留用户选择）
       if (_selectedLanguage == null && parsedSubtitles.isNotEmpty) {
         final sample =
             parsedSubtitles.take(5).map((s) => s.text).join(' ');
@@ -829,6 +831,7 @@ class TingjianAppState extends State<TingjianApp>
     if (_pronService == null) return;
     if (subtitles.isEmpty || currentSubtitleIndex >= subtitles.length) return;
 
+    // 记录评估前播放状态，以便评估结束后决定是否恢复播放
     _wasPlayingBeforeAssessment = isPlaying;
     if (isPlaying) {
       await _audioHandler.pause();
@@ -855,6 +858,7 @@ class TingjianAppState extends State<TingjianApp>
 
     final referenceText = subtitles[currentSubtitleIndex].text;
     final wasFollowRead = _isFollowReadMode;
+    // 快照本地变量，避免异步间隙中 _wasPlayingBeforeAssessment 被覆盖
     final shouldResume = _wasPlayingBeforeAssessment;
 
     try {
