@@ -1,6 +1,6 @@
 name: tingjian
 description: 听见 — 字幕音频播放器，专为精听训练设计：可调速、单句循环、字幕延迟显示。
-version: 1.1.6+8
+version: 1.1.7+9
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
