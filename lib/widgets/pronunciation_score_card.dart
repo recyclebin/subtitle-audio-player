@@ -164,7 +164,10 @@ class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+                // 细项评分：准确度、流利度、完整度、韵律（如有）
+                _SubScores(result: widget.result, isDark: widget.isDark),
+                const SizedBox(height: 12),
                 Expanded(
                   child: Container(
                     width: double.infinity,
@@ -394,4 +397,70 @@ class _WordChipState extends State<_WordChip> {
       ),
     );
   }
+}
+
+// 细项评分横排展示，节省纵向空间。
+class _SubScores extends StatelessWidget {
+  final AssessmentResult result;
+  final bool isDark;
+
+  const _SubScores({required this.result, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <_ScoreItem>[
+      _ScoreItem('准确度', result.accuracyScore),
+      _ScoreItem('流利度', result.fluencyScore),
+      _ScoreItem('完整度', result.completenessScore),
+      if (result.prosodyScore != null)
+        _ScoreItem('韵律', result.prosodyScore!),
+    ];
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : const Color(0xFF2E1065).withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  items[i].label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.45)
+                        : const Color(0xFF2E1065).withValues(alpha: 0.45),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '${items[i].score.round()}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: scoreColor(items[i].score),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ScoreItem {
+  final String label;
+  final double score;
+  const _ScoreItem(this.label, this.score);
 }

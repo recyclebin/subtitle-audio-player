@@ -45,6 +45,25 @@ void main() {
       expect(result.referenceText, 'hello world');
       expect(result.recognizedText, 'hello world');
       expect(result.overallScore, 91.0);
+      expect(result.accuracyScore, 92.0);
+      expect(result.fluencyScore, 88.0);
+      expect(result.completenessScore, 95.0);
+      expect(result.prosodyScore, isNull);
+    });
+
+    test('fromAzureResponse parses prosody score when present', () {
+      final withProsody = {
+        'NBest': [
+          {
+            'Lexical': 'hello',
+            'PronScore': 85.0,
+            'ProsodyScore': 80.0,
+            'Words': [],
+          }
+        ]
+      };
+      final result = AssessmentResult.fromAzureResponse(withProsody, 'hello');
+      expect(result.prosodyScore, 80.0);
     });
 
     test('fromAzureResponse parses word results correctly', () {
@@ -156,6 +175,10 @@ void main() {
         referenceText: 'test',
         recognizedText: 'test',
         overallScore: 85.0,
+        accuracyScore: 86.0,
+        fluencyScore: 78.0,
+        completenessScore: 90.0,
+        prosodyScore: 82.0,
         words: [
           WordResult(
             word: 'test',
@@ -175,6 +198,10 @@ void main() {
 
       expect(restored.referenceText, original.referenceText);
       expect(restored.overallScore, original.overallScore);
+      expect(restored.accuracyScore, original.accuracyScore);
+      expect(restored.fluencyScore, original.fluencyScore);
+      expect(restored.completenessScore, original.completenessScore);
+      expect(restored.prosodyScore, original.prosodyScore);
       expect(restored.language, original.language);
       expect(restored.words.length, original.words.length);
       expect(restored.words[0].phonemes.length, 1);
