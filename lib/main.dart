@@ -453,8 +453,9 @@ class TingjianAppState extends State<TingjianApp>
       playedSubtitlesIndices = [];
       currentSubtitleIndex =
           isRandomPlay ? _random.nextInt(parsedSubtitles.length) : 0;
-      // 加载文件时自动检测语种（取开头 5 句字幕，仅首次自动检测，之后保留用户选择）
-      if (_selectedLanguage == null && parsedSubtitles.isNotEmpty) {
+      // 每次加载文件重新自动检测语种，用户可通过「更多」手动更改
+      _selectedLanguage = null;
+      if (parsedSubtitles.isNotEmpty) {
         final sample =
             parsedSubtitles.take(5).map((s) => s.text).join(' ');
         _selectedLanguage = PronunciationService.detectLanguage(sample);
@@ -462,7 +463,6 @@ class TingjianAppState extends State<TingjianApp>
     });
     playAudioFromSubtitle(subtitles[currentSubtitleIndex]);
     _saveSettings();
-    _showLanguagePicker();
   }
 
   void _showLanguagePicker() {
