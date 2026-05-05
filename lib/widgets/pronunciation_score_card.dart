@@ -409,9 +409,9 @@ class _SubScores extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <_ScoreItem>[
-      _ScoreItem('准确度', result.accuracyScore),
-      _ScoreItem('流利度', result.fluencyScore),
-      _ScoreItem('完整度', result.completenessScore),
+      _ScoreItem('准确', result.accuracyScore),
+      _ScoreItem('流利', result.fluencyScore),
+      _ScoreItem('完整', result.completenessScore),
       if (result.prosodyScore != null)
         _ScoreItem('韵律', result.prosodyScore!),
     ];
