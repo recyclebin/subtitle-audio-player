@@ -90,6 +90,8 @@ class TingjianAppState extends State<TingjianApp>
   /// 评估前记录播放状态：暂停状态下触发评估，评估结束后不应自动恢复播放。
   bool _wasPlayingBeforeAssessment = false;
   bool _isRecording = false;
+  /// 录音已停止、等待评估结果返回期间，继续锁定播放控制按钮。
+  bool _isAssessing = false;
   Timer? _autoStopTimer;
   String? _selectedLanguage;
   bool _isPicking = false;
@@ -847,6 +849,7 @@ class TingjianAppState extends State<TingjianApp>
     if (subtitles.isEmpty || currentSubtitleIndex >= subtitles.length) return;
 
     _cancelRecordingTimers();
+    if (mounted) setState(() => _isAssessing = true);
 
     final referenceText = subtitles[currentSubtitleIndex].text;
     final wasFollowRead = _isFollowReadMode;
@@ -866,6 +869,7 @@ class TingjianAppState extends State<TingjianApp>
         await _historyService!.append(record);
       }
       if (mounted) {
+        setState(() => _isAssessing = false);
         _showScoreCard(
           result,
           autoDismissSeconds: wasFollowRead ? 3 : 0,
@@ -892,6 +896,7 @@ class TingjianAppState extends State<TingjianApp>
         );
       }
     } on AssessmentException catch (e) {
+      if (mounted) setState(() => _isAssessing = false);
       if (wasFollowRead) {
         playNextSubtitle();
       } else if (shouldResume) {
@@ -903,6 +908,7 @@ class TingjianAppState extends State<TingjianApp>
         );
       }
     } catch (e, st) {
+      if (mounted) setState(() => _isAssessing = false);
       debugPrint('Pronunciation assessment error: $e\n$st');
       if (wasFollowRead) {
         playNextSubtitle();
@@ -1199,6 +1205,7 @@ class TingjianAppState extends State<TingjianApp>
           : null,
       isFollowReadMode: _isFollowReadMode,
       isRecording: _isRecording,
+      isAssessing: _isAssessing,
       onToggleFollowRead: _isInitialized ? _toggleFollowReadMode : null,
       onStartRecording: (_isInitialized && isFileLoaded && _pronService != null)
           ? _startAssessment

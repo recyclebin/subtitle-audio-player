@@ -383,6 +383,8 @@ class PlayerScreen extends StatelessWidget {
 
   final bool isFollowReadMode;
   final bool isRecording;
+  /// 录音结束到评估结果展示期间锁定播放按钮，防止状态错乱。
+  final bool isAssessing;
   final VoidCallback? onToggleFollowRead;
   final VoidCallback? onStartRecording;
   final VoidCallback? onStopRecording;
@@ -415,6 +417,7 @@ class PlayerScreen extends StatelessWidget {
     this.onMoreTap,
     this.isFollowReadMode = false,
     this.isRecording = false,
+    this.isAssessing = false,
     this.onToggleFollowRead,
     this.onStartRecording,
     this.onStopRecording,
@@ -569,18 +572,18 @@ class PlayerScreen extends StatelessWidget {
                                   icon: isPlaying
                                       ? Icons.pause_rounded
                                       : Icons.play_arrow_rounded,
-                                  onTap: isRecording ? null : onPlayPause,
+                                  onTap: (isRecording || isAssessing) ? null : onPlayPause,
                                   isDark: isDark,
                                   isPrimary: true,
                                 ),
                                 PlayBtn(
                                   icon: Icons.skip_previous_rounded,
-                                  onTap: isRecording ? null : onPrevious,
+                                  onTap: (isRecording || isAssessing) ? null : onPrevious,
                                   isDark: isDark,
                                 ),
                                 PlayBtn(
                                   icon: Icons.skip_next_rounded,
-                                  onTap: isRecording ? null : onNext,
+                                  onTap: (isRecording || isAssessing) ? null : onNext,
                                   isDark: isDark,
                                 ),
                               ],
