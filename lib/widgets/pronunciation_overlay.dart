@@ -6,8 +6,8 @@ class PronunciationOverlay extends StatefulWidget {
   final bool isDark;
   final bool isInitialized;
   final bool isFileLoaded;
-  final VoidCallback onStartRecording;
-  final Future<void> Function() onStopRecording;
+  final VoidCallback? onStartRecording;
+  final Future<void> Function()? onStopRecording;
 
   const PronunciationOverlay({
     super.key,
@@ -54,7 +54,7 @@ class _PronunciationOverlayState extends State<PronunciationOverlay> {
       _loading = false;
     });
     _startTimer();
-    widget.onStartRecording();
+    widget.onStartRecording?.call();
   }
 
   Future<void> _handleStop() async {
@@ -64,7 +64,7 @@ class _PronunciationOverlayState extends State<PronunciationOverlay> {
     });
     _timer?.cancel();
     try {
-      await widget.onStopRecording();
+      await widget.onStopRecording?.call();
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -74,7 +74,7 @@ class _PronunciationOverlayState extends State<PronunciationOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    final enabled = widget.isInitialized && widget.isFileLoaded;
+    final enabled = widget.isInitialized && widget.isFileLoaded && widget.onStartRecording != null;
 
     if (!_recording && !_loading) {
       // IDLE state
