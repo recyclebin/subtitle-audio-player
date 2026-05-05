@@ -896,12 +896,17 @@ class TingjianAppState extends State<TingjianApp>
                   // 跟读 + 间隔显示字幕：先展示字幕再跳到下一句
                   if (isDelaySubtitleDisplay) {
                     setState(() => shouldShowSubtitle = true);
-                    _audioHandler
-                        .updateDisplaySubtitle(referenceText);
-                    Future.delayed(
+                    _audioHandler.updateDisplaySubtitle(referenceText);
+                    _audioHandler.updateIsPlaying(true);
+                    _audioHandler.isDelayPaused = true;
+                    _subtitleDelayTimer?.cancel();
+                    final timerGen = ++_timerGeneration;
+                    _subtitleDelayTimer = Timer(
                       Duration(milliseconds: (playInterval * 1000).round()),
                       () {
-                        if (mounted) playNextSubtitle();
+                        if (mounted && isPlaying && timerGen == _timerGeneration) {
+                          playNextSubtitle();
+                        }
                       },
                     );
                   } else {

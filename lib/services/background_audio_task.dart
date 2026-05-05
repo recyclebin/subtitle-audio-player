@@ -35,6 +35,7 @@ class MyAudioHandler extends BaseAudioHandler {
 
   bool get isAudioSourceSet => _audioPlayer.audioSource != null;
   bool get isDelayPaused => _isDelayPaused;
+  set isDelayPaused(bool v) => _isDelayPaused = v;
   double get desiredSpeed => _desiredSpeed;
   Duration? get audioDuration => _audioPlayer.duration;
 
