@@ -42,7 +42,8 @@ class AssessmentResult {
     final accuracyScore = (nbest['AccuracyScore'] as num?)?.toDouble() ?? 0;
     final fluencyScore = (nbest['FluencyScore'] as num?)?.toDouble() ?? 0;
     final completenessScore = (nbest['CompletenessScore'] as num?)?.toDouble() ?? 0;
-    final prosodyRaw = (nbest['ProsodyScore'] as num?)?.toDouble();
+    // ProsodyScore 可能是 flat number，也可能是 {"Score": 85} 嵌套对象
+    final prosodyRaw = _parseMaybeNested(nbest['ProsodyScore']);
 
     final wordsJson = (nbest['Words'] as List?) ?? [];
     final words = <WordResult>[];
@@ -91,6 +92,17 @@ class AssessmentResult {
         'words': words.map((w) => w.toJson()).toList(),
         if (language != null) 'language': language,
       };
+
+  /// Azure 某些字段可能为 flat number 或 `{"Score": N}` 嵌套对象，统一处理。
+  static double? _parseMaybeNested(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    if (value is Map<String, dynamic>) {
+      final nested = value['Score'] as num?;
+      return nested?.toDouble();
+    }
+    return null;
+  }
 
   factory AssessmentResult.fromJson(Map<String, dynamic> json) {
     final wordsJson = (json['words'] as List?) ?? [];

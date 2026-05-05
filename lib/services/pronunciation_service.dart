@@ -256,6 +256,13 @@ class PronunciationService {
           throw const AssessmentException('未识别到语音，请重试');
         }
 
+        // 调试：打印 NBest 中所有 key，确认 ProsodyScore 是否存在
+        final nbestList = json['NBest'] as List?;
+        if (nbestList != null && nbestList.isNotEmpty) {
+          final nbest = nbestList.first as Map<String, dynamic>;
+          debugPrint('PronunciationService: NBest keys: ${nbest.keys.toList()}');
+        }
+
         return AssessmentResult.fromAzureResponse(json, referenceText, language: lang);
       } finally {
         client.close();
