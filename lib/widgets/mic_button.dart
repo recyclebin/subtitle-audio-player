@@ -5,7 +5,6 @@ class MicButton extends StatelessWidget {
   final bool enabled;
   final bool isFollowReadMode;
   final bool isRecording;
-  final int recordingSeconds;
   final VoidCallback? onStartRecording;
   final VoidCallback? onStopRecording;
   final VoidCallback? onToggleFollowRead;
@@ -16,17 +15,10 @@ class MicButton extends StatelessWidget {
     required this.enabled,
     required this.isFollowReadMode,
     this.isRecording = false,
-    this.recordingSeconds = 0,
     this.onStartRecording,
     this.onStopRecording,
     this.onToggleFollowRead,
   });
-
-  String get _timeText {
-    final m = recordingSeconds ~/ 60;
-    final s = (recordingSeconds % 60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,45 +76,17 @@ class MicButton extends StatelessWidget {
   }
 
   Widget _buildRecording() {
-    return SizedBox(
-      width: 64,
-      height: 64,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Material(
-            color: const Color(0xFFEF4444),
-            shape: const CircleBorder(),
-            child: InkWell(
-              onTap: onStopRecording,
-              customBorder: const CircleBorder(),
-              child: const SizedBox(
-                width: 64,
-                height: 64,
-                child: Icon(Icons.stop_rounded, size: 32, color: Colors.white),
-              ),
-            ),
-          ),
-          Positioned(
-            top: -20,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEF4444),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _timeText,
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ],
+    return Material(
+      color: const Color(0xFFEF4444),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onStopRecording,
+        customBorder: const CircleBorder(),
+        child: const SizedBox(
+          width: 64,
+          height: 64,
+          child: Icon(Icons.stop_rounded, size: 32, color: Colors.white),
+        ),
       ),
     );
   }

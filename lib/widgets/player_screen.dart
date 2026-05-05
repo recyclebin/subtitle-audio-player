@@ -383,7 +383,6 @@ class PlayerScreen extends StatelessWidget {
 
   final bool isFollowReadMode;
   final bool isRecording;
-  final int recordingSeconds;
   final VoidCallback? onToggleFollowRead;
   final VoidCallback? onStartRecording;
   final VoidCallback? onStopRecording;
@@ -416,7 +415,6 @@ class PlayerScreen extends StatelessWidget {
     this.onMoreTap,
     this.isFollowReadMode = false,
     this.isRecording = false,
-    this.recordingSeconds = 0,
     this.onToggleFollowRead,
     this.onStartRecording,
     this.onStopRecording,
@@ -562,7 +560,6 @@ class PlayerScreen extends StatelessWidget {
                                         onStartRecording != null,
                                     isFollowReadMode: isFollowReadMode,
                                     isRecording: isRecording,
-                                    recordingSeconds: recordingSeconds,
                                     onStartRecording: onStartRecording,
                                     onStopRecording: onStopRecording,
                                     onToggleFollowRead: onToggleFollowRead,

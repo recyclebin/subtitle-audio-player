@@ -90,8 +90,6 @@ class TingjianAppState extends State<TingjianApp>
   /// 评估前记录播放状态：暂停状态下触发评估，评估结束后不应自动恢复播放。
   bool _wasPlayingBeforeAssessment = false;
   bool _isRecording = false;
-  int _recordingSeconds = 0;
-  Timer? _recordingTimer;
   Timer? _autoStopTimer;
   String? _selectedLanguage;
   bool _isPicking = false;
@@ -221,11 +219,6 @@ class TingjianAppState extends State<TingjianApp>
   }
 
   void _startRecordingTimers() {
-    _recordingSeconds = 0;
-    _recordingTimer?.cancel();
-    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _recordingSeconds++);
-    });
     if (mounted) setState(() => _isRecording = true);
 
     if (_isFollowReadMode) {
@@ -240,7 +233,6 @@ class TingjianAppState extends State<TingjianApp>
   }
 
   void _cancelRecordingTimers() {
-    _recordingTimer?.cancel();
     _autoStopTimer?.cancel();
     if (mounted) setState(() => _isRecording = false);
   }
@@ -878,7 +870,22 @@ class TingjianAppState extends State<TingjianApp>
           result,
           autoDismissSeconds: wasFollowRead ? 3 : 0,
           onDismissed: wasFollowRead
-              ? () => playNextSubtitle()
+              ? () {
+                  // 跟读 + 间隔显示字幕：先展示字幕再跳到下一句
+                  if (isDelaySubtitleDisplay) {
+                    setState(() => shouldShowSubtitle = true);
+                    _audioHandler
+                        .updateDisplaySubtitle(referenceText);
+                    Future.delayed(
+                      Duration(milliseconds: (playInterval * 1000).round()),
+                      () {
+                        if (mounted) playNextSubtitle();
+                      },
+                    );
+                  } else {
+                    playNextSubtitle();
+                  }
+                }
               : shouldResume
                   ? () => _audioHandler.play()
                   : null,
@@ -1192,7 +1199,6 @@ class TingjianAppState extends State<TingjianApp>
           : null,
       isFollowReadMode: _isFollowReadMode,
       isRecording: _isRecording,
-      recordingSeconds: _recordingSeconds,
       onToggleFollowRead: _isInitialized ? _toggleFollowReadMode : null,
       onStartRecording: (_isInitialized && isFileLoaded && _pronService != null)
           ? _startAssessment
