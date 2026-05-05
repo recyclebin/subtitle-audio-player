@@ -155,7 +155,7 @@ void main() {
     });
 
     test('toJson and fromJson roundtrip preserves data', () {
-      final original = const AssessmentResult(
+      const original = AssessmentResult(
         referenceText: 'test',
         recognizedText: 'test',
         overallScore: 85.0,
@@ -187,6 +187,36 @@ void main() {
       expect(restored.language, original.language);
       expect(restored.words.length, original.words.length);
       expect(restored.words[0].phonemes.length, 1);
+    });
+
+    test('legacy JSON without sub-scores deserializes to null fields', () {
+      final legacyJson = {
+        'referenceText': 'hi',
+        'recognizedText': 'hi',
+        'overallScore': 80.0,
+        'words': <Map<String, dynamic>>[],
+      };
+
+      final restored = AssessmentResult.fromJson(legacyJson);
+
+      expect(restored.accuracyScore, isNull);
+      expect(restored.fluencyScore, isNull);
+      expect(restored.completenessScore, isNull);
+    });
+
+    test('toJson omits null sub-score fields', () {
+      const result = AssessmentResult(
+        referenceText: 'hi',
+        recognizedText: 'hi',
+        overallScore: 80.0,
+        words: [],
+      );
+
+      final json = result.toJson();
+
+      expect(json.containsKey('accuracyScore'), isFalse);
+      expect(json.containsKey('fluencyScore'), isFalse);
+      expect(json.containsKey('completenessScore'), isFalse);
     });
   });
 }

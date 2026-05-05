@@ -2,9 +2,9 @@ class AssessmentResult {
   final String referenceText;
   final String recognizedText;
   final double overallScore;
-  final double accuracyScore;
-  final double fluencyScore;
-  final double completenessScore;
+  final double? accuracyScore;
+  final double? fluencyScore;
+  final double? completenessScore;
   final List<WordResult> words;
   final String? language;
 
@@ -12,9 +12,9 @@ class AssessmentResult {
     required this.referenceText,
     required this.recognizedText,
     required this.overallScore,
-    this.accuracyScore = 0,
-    this.fluencyScore = 0,
-    this.completenessScore = 0,
+    this.accuracyScore,
+    this.fluencyScore,
+    this.completenessScore,
     required this.words,
     this.language,
   });
@@ -37,9 +37,9 @@ class AssessmentResult {
     final nbest = nbestList.first as Map<String, dynamic>;
     final recognizedText = nbest['Lexical'] as String? ?? '';
     final overallScore = (nbest['PronScore'] as num?)?.toDouble() ?? 0;
-    final accuracyScore = (nbest['AccuracyScore'] as num?)?.toDouble() ?? 0;
-    final fluencyScore = (nbest['FluencyScore'] as num?)?.toDouble() ?? 0;
-    final completenessScore = (nbest['CompletenessScore'] as num?)?.toDouble() ?? 0;
+    final accuracyScore = (nbest['AccuracyScore'] as num?)?.toDouble();
+    final fluencyScore = (nbest['FluencyScore'] as num?)?.toDouble();
+    final completenessScore = (nbest['CompletenessScore'] as num?)?.toDouble();
 
     final wordsJson = (nbest['Words'] as List?) ?? [];
     final words = <WordResult>[];
@@ -80,9 +80,9 @@ class AssessmentResult {
         'referenceText': referenceText,
         'recognizedText': recognizedText,
         'overallScore': overallScore,
-        'accuracyScore': accuracyScore,
-        'fluencyScore': fluencyScore,
-        'completenessScore': completenessScore,
+        if (accuracyScore != null) 'accuracyScore': accuracyScore,
+        if (fluencyScore != null) 'fluencyScore': fluencyScore,
+        if (completenessScore != null) 'completenessScore': completenessScore,
         'words': words.map((w) => w.toJson()).toList(),
         if (language != null) 'language': language,
       };
@@ -93,10 +93,9 @@ class AssessmentResult {
       referenceText: json['referenceText'] as String? ?? '',
       recognizedText: json['recognizedText'] as String? ?? '',
       overallScore: (json['overallScore'] as num?)?.toDouble() ?? 0,
-      accuracyScore: (json['accuracyScore'] as num?)?.toDouble() ?? 0,
-      fluencyScore: (json['fluencyScore'] as num?)?.toDouble() ?? 0,
-      completenessScore:
-          (json['completenessScore'] as num?)?.toDouble() ?? 0,
+      accuracyScore: (json['accuracyScore'] as num?)?.toDouble(),
+      fluencyScore: (json['fluencyScore'] as num?)?.toDouble(),
+      completenessScore: (json['completenessScore'] as num?)?.toDouble(),
       words: wordsJson
           .map((w) => WordResult.fromJson(w as Map<String, dynamic>))
           .toList(),

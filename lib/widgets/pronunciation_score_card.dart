@@ -165,7 +165,7 @@ class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                // 细项评分：准确度、流利度、完整度、韵律（如有）
+                // 细项评分：准确度、流利度、完整度
                 _SubScores(result: widget.result, isDark: widget.isDark),
                 const SizedBox(height: 12),
                 Expanded(
@@ -408,57 +408,75 @@ class _SubScores extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = <_ScoreItem>[
-      _ScoreItem('准确', result.accuracyScore),
-      _ScoreItem('流利', result.fluencyScore),
-      _ScoreItem('完整', result.completenessScore),
+    final chips = <Widget>[
+      if (result.accuracyScore case final s?)
+        _SubScoreChip(label: '准确', score: s, isDark: isDark),
+      if (result.fluencyScore case final s?)
+        _SubScoreChip(label: '流利', score: s, isDark: isDark),
+      if (result.completenessScore case final s?)
+        _SubScoreChip(label: '完整', score: s, isDark: isDark),
     ];
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var i = 0; i < items.length; i++) ...[
-          if (i > 0) const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.05)
-                  : const Color(0xFF2E1065).withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  items[i].label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.45)
-                        : const Color(0xFF2E1065).withValues(alpha: 0.45),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '${items[i].score.round()}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: scoreColor(items[i].score),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
+    if (chips.isEmpty) return const SizedBox.shrink();
+
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 10,
+      runSpacing: 6,
+      children: chips,
     );
   }
 }
 
-class _ScoreItem {
+class _SubScoreChip extends StatelessWidget {
   final String label;
   final double score;
-  const _ScoreItem(this.label, this.score);
+  final bool isDark;
+
+  const _SubScoreChip({
+    required this.label,
+    required this.score,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mutedColor = isDark
+        ? Colors.white.withValues(alpha: 0.45)
+        : const Color(0xFF2E1065).withValues(alpha: 0.45);
+    final bgColor = isDark
+        ? Colors.white.withValues(alpha: 0.05)
+        : const Color(0xFF2E1065).withValues(alpha: 0.06);
+
+    return Semantics(
+      container: true,
+      label: '$label ${score.round()}',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(fontSize: 11, color: mutedColor),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '${score.round()}',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: scoreColor(score),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
