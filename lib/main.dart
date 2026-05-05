@@ -557,7 +557,19 @@ class TingjianAppState extends State<TingjianApp>
                                   size: 20, color: Color(0xFFA855F7))
                               : null,
                           onTap: () {
-                            setState(() => _selectedLanguage = e.key);
+                            setState(() {
+                              if (e.key == null && subtitles.isNotEmpty) {
+                                // 「自动检测」：立即检测并落定为具体语种
+                                final sample = subtitles
+                                    .take(5)
+                                    .map((s) => s.text)
+                                    .join(' ');
+                                _selectedLanguage =
+                                    PronunciationService.detectLanguage(sample);
+                              } else {
+                                _selectedLanguage = e.key;
+                              }
+                            });
                             Navigator.of(ctx).pop();
                           },
                         );
