@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tingjian/services/pronunciation_service.dart';
 
@@ -14,24 +16,28 @@ void main() {
     });
 
     group('buildAssessmentConfig', () {
-      test('returns valid JSON config string', () {
+      test('returns Base64-encoded JSON config', () {
         final config = service.buildAssessmentConfig(
           referenceText: 'hello world',
           language: 'en-US',
         );
 
-        expect(config, contains('"ReferenceText":"hello world"'));
-        expect(config, contains('"GradingSystem":"FivePoint"'));
-        expect(config, contains('"Granularity":"Phoneme"'));
+        final json = utf8.decode(base64Decode(config));
+        expect(json, contains('"ReferenceText":"hello world"'));
+        expect(json, contains('"GradingSystem":"HundredMark"'));
+        expect(json, contains('"Granularity":"Phoneme"'));
+        expect(json, contains('"PhonemeAlphabet":"IPA"'));
       });
 
-      test('escapes quotes in reference text', () {
+      test('Base64 decodes to valid JSON with escaped quotes', () {
         final config = service.buildAssessmentConfig(
           referenceText: 'he said "hello"',
           language: 'en-US',
         );
 
-        expect(config, contains(r'he said \"hello\"'));
+        final json = utf8.decode(base64Decode(config));
+        final parsed = jsonDecode(json) as Map<String, dynamic>;
+        expect(parsed['ReferenceText'], 'he said "hello"');
       });
     });
 
@@ -58,6 +64,26 @@ void main() {
 
       test('returns en-US for digits', () {
         expect(service.detectLanguage('123'), 'en-US');
+      });
+
+      test('returns es-ES for Spanish text', () {
+        expect(service.detectLanguage('¿Cómo estás?'), 'es-ES');
+        expect(service.detectLanguage('mañana'), 'es-ES');
+      });
+
+      test('returns pt-PT for Portuguese text', () {
+        expect(service.detectLanguage('não'), 'pt-PT');
+        expect(service.detectLanguage('informações'), 'pt-PT');
+      });
+
+      test('returns fr-FR for French text', () {
+        expect(service.detectLanguage('très bien'), 'fr-FR');
+        expect(service.detectLanguage('naïf'), 'fr-FR');
+      });
+
+      test('returns en-US for plain Latin text without markers', () {
+        expect(service.detectLanguage('hello world'), 'en-US');
+        expect(service.detectLanguage('cafe'), 'en-US');
       });
     });
   });

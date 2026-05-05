@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/assessment_result.dart';
@@ -8,107 +10,221 @@ Color scoreColor(double score) {
   return const Color(0xFFEF4444);
 }
 
-class PronunciationScoreCard extends StatelessWidget {
+String languageName(String? code) => switch (code) {
+      'zh-CN' => '中文（普通话）',
+      'ja-JP' => '日本語',
+      'ko-KR' => '한국어',
+      'th-TH' => 'ไทย',
+      'en-US' => 'English',
+      'fr-FR' => 'Français',
+      'es-ES' => 'Español',
+      'pt-PT' => 'Português',
+      _ => '自动检测',
+    };
+
+class PronunciationScoreCard extends StatefulWidget {
   final AssessmentResult result;
   final bool isDark;
+  final int autoDismissSeconds;
   final VoidCallback onClose;
 
   const PronunciationScoreCard({
     super.key,
     required this.result,
     required this.isDark,
+    this.autoDismissSeconds = 0,
     required this.onClose,
   });
 
   @override
+  State<PronunciationScoreCard> createState() => _PronunciationScoreCardState();
+}
+
+class _PronunciationScoreCardState extends State<PronunciationScoreCard> {
+  int _countdown = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _resetTimer();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _resetTimer() {
+    _timer?.cancel();
+    if (widget.autoDismissSeconds > 0) {
+      setState(() => _countdown = widget.autoDismissSeconds);
+      _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) return;
+        if (_countdown <= 1) {
+          timer.cancel();
+          widget.onClose();
+        } else {
+          setState(() => _countdown--);
+        }
+      });
+    }
+  }
+
+  void _onUserInteraction() {
+    if (widget.autoDismissSeconds > 0) {
+      _resetTimer();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1A0A2E) : Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: EdgeInsets.only(
-        top: 12,
-        bottom: MediaQuery.of(context).padding.bottom + 28,
-        left: 24,
-        right: 24,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.20)
-                  : const Color(0xFF6D28D9).withValues(alpha: 0.25),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            '${result.overallScore.round()}',
-            style: TextStyle(
-              fontSize: 56,
-              fontWeight: FontWeight.w700,
-              color: scoreColor(result.overallScore),
-            ),
-          ),
-          Text(
-            '发音得分',
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.50)
-                  : const Color(0xFF2E1065).withValues(alpha: 0.50),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.04)
-                  : const Color(0xFFF6F4FB),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final bottomPadding = MediaQuery.of(context).padding.bottom + 28;
+    return GestureDetector(
+      onTap: _onUserInteraction,
+      behavior: HitTestBehavior.translucent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: widget.isDark ? const Color(0xFF1A0A2E) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: EdgeInsets.only(
+          top: 12,
+          bottom: bottomPadding,
+          left: 24,
+          right: 24,
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(
-                  '逐词评估',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.60)
-                        : const Color(0xFF2E1065).withValues(alpha: 0.60),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: widget.isDark
+                        ? Colors.white.withValues(alpha: 0.20)
+                        : const Color(0xFF6D28D9).withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: result.words.map((w) {
-                    return _WordChip(word: w);
-                  }).toList(),
+                const SizedBox(height: 20),
+                Text(
+                  '${widget.result.overallScore.round()}',
+                  style: TextStyle(
+                    fontSize: 56,
+                    fontWeight: FontWeight.w700,
+                    color: scoreColor(widget.result.overallScore),
+                  ),
                 ),
+                Text(
+                  '发音得分',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: widget.isDark
+                        ? Colors.white.withValues(alpha: 0.50)
+                        : const Color(0xFF2E1065).withValues(alpha: 0.50),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: widget.isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : const Color(0xFF2E1065).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.language_rounded,
+                          size: 14,
+                          color: widget.isDark
+                              ? Colors.white.withValues(alpha: 0.45)
+                              : const Color(0xFF2E1065).withValues(alpha: 0.45)),
+                      const SizedBox(width: 6),
+                      Text(
+                        languageName(widget.result.language),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: widget.isDark
+                              ? Colors.white.withValues(alpha: 0.55)
+                              : const Color(0xFF2E1065).withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Expanded(
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: widget.isDark
+                          ? Colors.white.withValues(alpha: 0.04)
+                          : const Color(0xFFF6F4FB),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '逐词评估',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: widget.isDark
+                                  ? Colors.white.withValues(alpha: 0.60)
+                                  : const Color(0xFF2E1065).withValues(alpha: 0.60),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: widget.result.words.map((w) {
+                              return _WordChip(word: w);
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _countdown > 0
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          TextButton.icon(
+                            onPressed: widget.onClose,
+                            icon: const Icon(Icons.close, size: 18),
+                            label: Text('关闭 ($_countdown)'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFA855F7),
+                            ),
+                          ),
+                        ],
+                      )
+                    : TextButton.icon(
+                        onPressed: widget.onClose,
+                        icon: const Icon(Icons.close, size: 18),
+                        label: const Text('关闭'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFA855F7),
+                        ),
+                      ),
               ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextButton.icon(
-            onPressed: onClose,
-            icon: const Icon(Icons.close, size: 18),
-            label: const Text('关闭'),
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFA855F7),
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -180,28 +296,51 @@ class _WordChipState extends State<_WordChip> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: word.phonemes.map((p) {
+                  final hasName = p.phoneme.isNotEmpty;
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          p.phoneme,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: scoreColor(p.score),
+                    child: hasName
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                p.phoneme,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: scoreColor(p.score),
+                                ),
+                              ),
+                              Text(
+                                '${p.score.round()}%',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  color: scoreColor(p.score)
+                                      .withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ],
+                          )
+                        : Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: scoreColor(p.score).withValues(alpha: 0.15),
+                              border: Border.all(
+                                  color: scoreColor(p.score)
+                                      .withValues(alpha: 0.3)),
+                            ),
+                            child: Text(
+                              '${p.score.round()}',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: scoreColor(p.score),
+                              ),
+                            ),
                           ),
-                        ),
-                        Text(
-                          '${p.score.round()}%',
-                          style: TextStyle(
-                            fontSize: 9,
-                            color: scoreColor(p.score).withValues(alpha: 0.7),
-                          ),
-                        ),
-                      ],
-                    ),
                   );
                 }).toList(),
               ),

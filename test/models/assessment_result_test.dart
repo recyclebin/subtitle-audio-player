@@ -8,12 +8,10 @@ void main() {
         {
           'Lexical': 'hello world',
           'Confidence': 0.95,
-          'PronunciationAssessment': {
-            'AccuracyScore': 92.0,
-            'FluencyScore': 88.0,
-            'CompletenessScore': 95.0,
-            'PronScore': 91.0,
-          },
+          'PronScore': 91.0,
+          'AccuracyScore': 92.0,
+          'FluencyScore': 88.0,
+          'CompletenessScore': 95.0,
           'Words': [
             {
               'Word': 'hello',
@@ -46,7 +44,7 @@ void main() {
 
       expect(result.referenceText, 'hello world');
       expect(result.recognizedText, 'hello world');
-      expect(result.overallScore, 92.0);
+      expect(result.overallScore, 91.0);
     });
 
     test('fromAzureResponse parses word results correctly', () {
@@ -169,6 +167,7 @@ void main() {
             ],
           ),
         ],
+        language: 'en-US',
       );
 
       final json = original.toJson();
@@ -176,6 +175,7 @@ void main() {
 
       expect(restored.referenceText, original.referenceText);
       expect(restored.overallScore, original.overallScore);
+      expect(restored.language, original.language);
       expect(restored.words.length, original.words.length);
       expect(restored.words[0].phonemes.length, 1);
     });

@@ -134,4 +134,12 @@ class AssessmentHistoryService {
       );
     });
   }
+
+  Future<void> clearAll() async {
+    final dir = Directory(_dirPath);
+    if (await dir.exists()) {
+      await dir.delete(recursive: true);
+      await dir.create(recursive: true);
+    }
+  }
 }

@@ -3,18 +3,21 @@ class AssessmentResult {
   final String recognizedText;
   final double overallScore;
   final List<WordResult> words;
+  final String? language;
 
   const AssessmentResult({
     required this.referenceText,
     required this.recognizedText,
     required this.overallScore,
     required this.words,
+    this.language,
   });
 
   factory AssessmentResult.fromAzureResponse(
     Map<String, dynamic> json,
-    String referenceText,
-  ) {
+    String referenceText, {
+    String? language,
+  }) {
     final nbestList = json['NBest'] as List?;
     if (nbestList == null || nbestList.isEmpty) {
       return AssessmentResult(
@@ -22,12 +25,12 @@ class AssessmentResult {
         recognizedText: '',
         overallScore: 0,
         words: [],
+        language: language,
       );
     }
     final nbest = nbestList.first as Map<String, dynamic>;
     final recognizedText = nbest['Lexical'] as String? ?? '';
-    final pa = nbest['PronunciationAssessment'] as Map<String, dynamic>? ?? {};
-    final overallScore = (pa['AccuracyScore'] as num?)?.toDouble() ?? 0;
+    final overallScore = (nbest['PronScore'] as num?)?.toDouble() ?? 0;
 
     final wordsJson = (nbest['Words'] as List?) ?? [];
     final words = <WordResult>[];
@@ -57,6 +60,7 @@ class AssessmentResult {
       recognizedText: recognizedText,
       overallScore: overallScore,
       words: words,
+      language: language,
     );
   }
 
@@ -65,6 +69,7 @@ class AssessmentResult {
         'recognizedText': recognizedText,
         'overallScore': overallScore,
         'words': words.map((w) => w.toJson()).toList(),
+        if (language != null) 'language': language,
       };
 
   factory AssessmentResult.fromJson(Map<String, dynamic> json) {
@@ -76,6 +81,7 @@ class AssessmentResult {
       words: wordsJson
           .map((w) => WordResult.fromJson(w as Map<String, dynamic>))
           .toList(),
+      language: json['language'] as String?,
     );
   }
 }

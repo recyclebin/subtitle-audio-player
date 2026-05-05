@@ -3,19 +3,46 @@ import 'package:path/path.dart' as path;
 
 import '../models/assessment_result.dart';
 import '../services/assessment_history_service.dart';
-import 'pronunciation_score_card.dart';
+import 'pronunciation_score_card.dart' show scoreColor, languageName;
 
 class HistoryListView extends StatelessWidget {
   final Map<String, FileGroup> fileGroups;
   final bool isDark;
   final void Function(AssessmentResult) onViewResult;
+  final VoidCallback? onClear;
 
   const HistoryListView({
     super.key,
     required this.fileGroups,
     required this.isDark,
     required this.onViewResult,
+    this.onClear,
   });
+
+  Future<void> _confirmClear(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空历史'),
+        content: const Text('确认删除所有评估历史记录？此操作不可恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除全部',
+                style: TextStyle(color: Color(0xFFEF4444))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      onClear?.call();
+      if (context.mounted) Navigator.of(context).pop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,6 +75,19 @@ class HistoryListView extends StatelessWidget {
           ),
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: [
+          if (entries.isNotEmpty && onClear != null)
+            IconButton(
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                size: 20,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.55)
+                    : const Color(0xFF2E1065).withValues(alpha: 0.55),
+              ),
+              onPressed: () => _confirmClear(context),
+            ),
+        ],
       ),
       body: entries.isEmpty
           ? Center(
@@ -147,6 +187,15 @@ class _FileGroupCard extends StatelessWidget {
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.70)
                     : const Color(0xFF2E1065).withValues(alpha: 0.70),
+              ),
+            ),
+            subtitle: Text(
+              languageName(r.result.language),
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.35)
+                    : const Color(0xFF2E1065).withValues(alpha: 0.35),
               ),
             ),
             trailing: Text(

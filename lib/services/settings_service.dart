@@ -10,7 +10,6 @@ class SettingsData {
   final int currentSubtitleIndex;
   final double playbackSpeed;
   final List<int> playedSubtitlesIndices;
-  final int assessmentMode; // 0 = afterSubtitle, 1 = karaoke
   final String? azureSubscriptionKey;
   final String? azureRegion;
 
@@ -24,7 +23,6 @@ class SettingsData {
     this.currentSubtitleIndex = 0,
     this.playbackSpeed = 1.0,
     this.playedSubtitlesIndices = const [],
-    this.assessmentMode = 0,
     this.azureSubscriptionKey,
     this.azureRegion,
   });
@@ -46,7 +44,6 @@ class SettingsService {
           .map((i) => int.tryParse(i))
           .whereType<int>()
           .toList(),
-      assessmentMode: prefs.getInt('assessmentMode') ?? 0,
       azureSubscriptionKey: prefs.getString('azureSubscriptionKey'),
       azureRegion: prefs.getString('azureRegion'),
     );
@@ -73,7 +70,6 @@ class SettingsService {
       await prefs.setDouble('playbackSpeed', s.playbackSpeed);
       await prefs.setStringList('playedSubtitlesIndices',
           s.playedSubtitlesIndices.map((i) => i.toString()).toList());
-      await prefs.setInt('assessmentMode', s.assessmentMode);
       if (s.azureSubscriptionKey != null && s.azureSubscriptionKey!.isNotEmpty) {
         await prefs.setString('azureSubscriptionKey', s.azureSubscriptionKey!);
       } else {

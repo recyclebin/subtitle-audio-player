@@ -80,9 +80,14 @@ class TingjianAppState extends State<TingjianApp>
   bool _isInitialized = false;
   PronunciationService? _pronService;
   AssessmentHistoryService? _historyService;
-  int _assessmentMode = 0;
   String? _azureKey;
   String? _azureRegion;
+  bool _isFollowReadMode = false;
+  bool _isRecording = false;
+  int _recordingSeconds = 0;
+  Timer? _recordingTimer;
+  Timer? _autoStopTimer;
+  String? _selectedLanguage;
   bool _isPicking = false;
 
   @override
@@ -166,6 +171,12 @@ class TingjianAppState extends State<TingjianApp>
 
   Future<void> onSubtitleEnd() async {
     if (!isPlaying) return;
+    if (_isFollowReadMode && _pronService != null) {
+      await _audioHandler.pause();
+      if (!mounted) return;
+      _autoStartRecording();
+      return;
+    }
     final endTime = subtitles[currentSubtitleIndex].endTime;
     final intervalMs = (playInterval * 1000).round();
     final dur = _audioHandler.audioDuration;
@@ -189,6 +200,45 @@ class TingjianAppState extends State<TingjianApp>
     });
   }
 
+  Future<void> _autoStartRecording() async {
+    try {
+      final hasPerm = await _pronService!.checkPermission();
+      if (!hasPerm) {
+        if (mounted) _showMicPermissionDialog();
+        return;
+      }
+      await _pronService!.startRecording();
+      _startRecordingTimers();
+    } catch (e) {
+      debugPrint('跟读自动录音失败: $e');
+    }
+  }
+
+  void _startRecordingTimers() {
+    _recordingSeconds = 0;
+    _recordingTimer?.cancel();
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _recordingSeconds++);
+    });
+    if (mounted) setState(() => _isRecording = true);
+
+    if (_isFollowReadMode) {
+      final sub = subtitles[currentSubtitleIndex];
+      final durationMs = (sub.endTime - sub.startTime).inMilliseconds;
+      final autoStopMs = (durationMs * 1.5).round() + 1000;
+      _autoStopTimer?.cancel();
+      _autoStopTimer = Timer(Duration(milliseconds: autoStopMs), () {
+        if (mounted && _isRecording) _stopAssessment();
+      });
+    }
+  }
+
+  void _cancelRecordingTimers() {
+    _recordingTimer?.cancel();
+    _autoStopTimer?.cancel();
+    if (mounted) setState(() => _isRecording = false);
+  }
+
   void cancelSubtitleTimer() {
     ++_timerGeneration;
     _subtitleDelayTimer?.cancel();
@@ -207,7 +257,6 @@ class TingjianAppState extends State<TingjianApp>
         playInterval = s.playInterval;
         currentSubtitleIndex = s.currentSubtitleIndex;
         playbackSpeed = s.playbackSpeed;
-        _assessmentMode = s.assessmentMode;
         _azureKey = s.azureSubscriptionKey;
         _azureRegion = s.azureRegion;
         playedSubtitlesIndices = s.playedSubtitlesIndices;
@@ -269,7 +318,6 @@ class TingjianAppState extends State<TingjianApp>
         currentSubtitleIndex: currentSubtitleIndex,
         playbackSpeed: playbackSpeed,
         playedSubtitlesIndices: playedSubtitlesIndices,
-        assessmentMode: _assessmentMode,
         azureSubscriptionKey: _azureKey,
         azureRegion: _azureRegion,
       );
@@ -410,6 +458,108 @@ class TingjianAppState extends State<TingjianApp>
     });
     playAudioFromSubtitle(subtitles[currentSubtitleIndex]);
     _saveSettings();
+    _showLanguagePicker();
+  }
+
+  void _showLanguagePicker() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final currentLang = _selectedLanguage;
+    final options = {
+      null: '自动检测',
+      'zh-CN': '中文（普通话）',
+      'ja-JP': '日本語',
+      'ko-KR': '한국어',
+      'th-TH': 'ไทย',
+      'en-US': 'English',
+      'fr-FR': 'Français',
+      'es-ES': 'Español',
+      'pt-PT': 'Português',
+    };
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final textColor = isDark
+            ? Colors.white.withValues(alpha: 0.85)
+            : const Color(0xFF1E0A3C);
+        final bgColor = isDark ? const Color(0xFF1A0A2E) : Colors.white;
+
+        return Container(
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: EdgeInsets.only(
+            top: 12,
+            bottom: MediaQuery.of(ctx).padding.bottom + 28,
+            left: 24,
+            right: 24,
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.20)
+                          : const Color(0xFF6D28D9).withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    '选择发音评估语言',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: constraints.maxHeight * 0.65,
+                    ),
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: options.entries.map((e) {
+                        final selected = currentLang == e.key;
+                        return ListTile(
+                          title: Text(
+                            e.value,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight:
+                                  selected ? FontWeight.w700 : FontWeight.w400,
+                              color: selected
+                                  ? const Color(0xFFA855F7)
+                                  : textColor,
+                            ),
+                          ),
+                          trailing: selected
+                              ? const Icon(Icons.check_rounded,
+                                  size: 20, color: Color(0xFFA855F7))
+                              : null,
+                          onTap: () {
+                            setState(() => _selectedLanguage = e.key);
+                            Navigator.of(ctx).pop();
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _restorePrevAudio(String? prevAudioPath,
@@ -638,41 +788,42 @@ class TingjianAppState extends State<TingjianApp>
   }
 
   Future<void> _initPronunciationServices() async {
-    await _tryInitPronunciationServices(
-      key: _azureKey ?? '',
-      region: _azureRegion ?? 'eastasia',
-    );
+    _historyService ??= await AssessmentHistoryService.create();
+    if ((_azureKey ?? '').isNotEmpty) {
+      _pronService?.dispose();
+      _pronService = PronunciationService(
+        subscriptionKey: _azureKey!,
+        region: _azureRegion ?? 'eastasia',
+      );
+    }
   }
 
   Future<void> _tryInitPronunciationServices({
     required String key,
     required String region,
   }) async {
+    _historyService ??= await AssessmentHistoryService.create();
     if (key.isEmpty) return;
     _pronService?.dispose();
     _pronService = PronunciationService(subscriptionKey: key, region: region);
-    _historyService ??= await AssessmentHistoryService.create();
   }
 
   Future<void> _startAssessment() async {
     if (_pronService == null) return;
     if (subtitles.isEmpty || currentSubtitleIndex >= subtitles.length) return;
 
-    if (_assessmentMode == 0) {
-      if (isPlaying) {
-        await _audioHandler.pause();
-      }
+    if (isPlaying) {
+      await _audioHandler.pause();
     }
 
     try {
       final hasPerm = await _pronService!.checkPermission();
       if (!hasPerm) {
-        if (mounted) {
-          _showMicPermissionDialog();
-        }
+        if (mounted) _showMicPermissionDialog();
         return;
       }
       await _pronService!.startRecording();
+      _startRecordingTimers();
     } catch (e) {
       debugPrint('开始录音失败: $e');
     }
@@ -682,13 +833,13 @@ class TingjianAppState extends State<TingjianApp>
     if (_pronService == null) return;
     if (subtitles.isEmpty || currentSubtitleIndex >= subtitles.length) return;
 
+    _cancelRecordingTimers();
+
     final referenceText = subtitles[currentSubtitleIndex].text;
+    final wasFollowRead = _isFollowReadMode;
 
     try {
-      final result = await _pronService!.stopAndAssess(referenceText);
-      if (_assessmentMode == 0) {
-        await _audioHandler.play();
-      }
+      final result = await _pronService!.stopAndAssess(referenceText, language: _selectedLanguage);
       if (_historyService != null) {
         final record = AssessmentRecord(
           id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -700,10 +851,18 @@ class TingjianAppState extends State<TingjianApp>
         await _historyService!.append(record);
       }
       if (mounted) {
-        _showScoreCard(result);
+        _showScoreCard(
+          result,
+          autoDismissSeconds: wasFollowRead ? 3 : 0,
+          onDismissed: wasFollowRead
+              ? () => playNextSubtitle()
+              : () => _audioHandler.play(),
+        );
       }
     } on AssessmentException catch (e) {
-      if (_assessmentMode == 0) {
+      if (wasFollowRead) {
+        playNextSubtitle();
+      } else {
         await _audioHandler.play();
       }
       if (mounted) {
@@ -711,13 +870,16 @@ class TingjianAppState extends State<TingjianApp>
           SnackBar(content: Text(e.message)),
         );
       }
-    } catch (e) {
-      if (_assessmentMode == 0) {
+    } catch (e, st) {
+      debugPrint('Pronunciation assessment error: $e\n$st');
+      if (wasFollowRead) {
+        playNextSubtitle();
+      } else {
         await _audioHandler.play();
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('评估失败，请重试')),
+          SnackBar(content: Text('评估失败：$e')),
         );
       }
     }
@@ -739,7 +901,11 @@ class TingjianAppState extends State<TingjianApp>
     );
   }
 
-  void _showScoreCard(AssessmentResult result) {
+  void _showScoreCard(
+    AssessmentResult result, {
+    int autoDismissSeconds = 0,
+    VoidCallback? onDismissed,
+  }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
@@ -747,9 +913,17 @@ class TingjianAppState extends State<TingjianApp>
       builder: (_) => PronunciationScoreCard(
         result: result,
         isDark: isDark,
-        onClose: () => Navigator.of(context).pop(),
+        autoDismissSeconds: autoDismissSeconds,
+        onClose: () {
+          Navigator.of(context).pop();
+          onDismissed?.call();
+        },
       ),
     );
+  }
+
+  void _toggleFollowReadMode() {
+    setState(() => _isFollowReadMode = !_isFollowReadMode);
   }
 
   Future<void> _openHistory() async {
@@ -765,16 +939,97 @@ class TingjianAppState extends State<TingjianApp>
           onViewResult: (result) {
             _showScoreCard(result);
           },
+          onClear: () => _historyService?.clearAll(),
         ),
       ),
     );
   }
 
-  void _toggleAssessmentMode() {
-    setState(() {
-      _assessmentMode = _assessmentMode == 0 ? 1 : 0;
-    });
-    _saveSettings();
+  void _showMoreSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final canOpenHistory = _historyService != null;
+    final canPickFile = _isInitialized;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final bgColor = isDark ? const Color(0xFF1A0A2E) : Colors.white;
+
+        return Container(
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: EdgeInsets.only(
+            top: 12,
+            bottom: MediaQuery.of(ctx).padding.bottom + 28,
+            left: 24,
+            right: 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.20)
+                      : const Color(0xFF6D28D9).withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 24),
+              _MoreMenuItem(
+                icon: Icons.history_rounded,
+                title: '发音评估历史',
+                subtitle: '查看过往发音评估记录',
+                isDark: isDark,
+                enabled: canOpenHistory,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _openHistory();
+                },
+              ),
+              _MoreMenuItem(
+                icon: Icons.key_rounded,
+                title: '发音评估服务配置',
+                subtitle: '配置 Azure 语音服务密钥',
+                isDark: isDark,
+                enabled: true,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showAzureConfig();
+                },
+              ),
+              _MoreMenuItem(
+                icon: Icons.language_rounded,
+                title: '发音评估语言',
+                subtitle: languageName(_selectedLanguage),
+                isDark: isDark,
+                enabled: true,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showLanguagePicker();
+                },
+              ),
+              _MoreMenuItem(
+                icon: Icons.folder_open_rounded,
+                title: '切换音频和字幕文件',
+                subtitle: '更换当前播放的音频和字幕',
+                isDark: isDark,
+                enabled: canPickFile,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  pickAudioFileAndFindSubtitle();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _showAzureConfig() {
@@ -783,48 +1038,62 @@ class TingjianAppState extends State<TingjianApp>
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Azure 语音服务配置'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: keyController,
-              decoration: const InputDecoration(
-                labelText: 'Subscription Key',
-                hintText: '请输入 Azure 订阅密钥',
-                border: OutlineInputBorder(),
+      builder: (ctx) {
+        var obscureKey = true;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Azure 语音服务配置'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: keyController,
+                    obscureText: obscureKey,
+                    decoration: InputDecoration(
+                      labelText: 'Subscription Key',
+                      hintText: '请输入 Azure 订阅密钥',
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscureKey ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                          size: 20,
+                        ),
+                        onPressed: () => setDialogState(() => obscureKey = !obscureKey),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: regionController,
+                    decoration: const InputDecoration(
+                      labelText: 'Region',
+                      hintText: 'eastasia',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
               ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: regionController,
-              decoration: const InputDecoration(
-                labelText: 'Region',
-                hintText: 'eastasia',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              final key = keyController.text.trim();
-              final region = regionController.text.trim();
-              if (key.isEmpty) return;
-              _configureAzure(key: key, region: region);
-              Navigator.of(ctx).pop();
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('取消'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    final key = keyController.text.trim();
+                    final region = regionController.text.trim();
+                    if (key.isEmpty) return;
+                    _configureAzure(key: key, region: region);
+                    Navigator.of(ctx).pop();
+                  },
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -896,19 +1165,101 @@ class TingjianAppState extends State<TingjianApp>
               _saveSettings();
             }
           : null,
-      onFileTap: _isInitialized ? pickAudioFileAndFindSubtitle : null,
-      assessmentMode: _assessmentMode,
+      isFollowReadMode: _isFollowReadMode,
+      isRecording: _isRecording,
+      recordingSeconds: _recordingSeconds,
+      onToggleFollowRead: _isInitialized ? _toggleFollowReadMode : null,
       onStartRecording: (_isInitialized && isFileLoaded && _pronService != null)
           ? _startAssessment
           : null,
       onStopRecording: (_isInitialized && isFileLoaded && _pronService != null)
           ? _stopAssessment
           : null,
-      onToggleAssessmentMode: _isInitialized ? _toggleAssessmentMode : null,
-      onOpenHistory: (_isInitialized && _historyService != null)
-          ? _openHistory
-          : null,
-      onConfigureAzure: _isInitialized ? _showAzureConfig : null,
+      onMoreTap: _isInitialized ? _showMoreSheet : null,
+    );
+  }
+}
+
+class _MoreMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool isDark;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  const _MoreMenuItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.isDark,
+    required this.enabled,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isDark
+        ? Colors.white.withValues(alpha: enabled ? 0.85 : 0.30)
+        : Color(0xFF1E0A3C).withValues(alpha: enabled ? 1.0 : 0.30);
+    final subtitleColor = isDark
+        ? Colors.white.withValues(alpha: enabled ? 0.45 : 0.15)
+        : Color(0xFF2E1065).withValues(alpha: enabled ? 0.50 : 0.15);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isDark
+                        ? Colors.white.withValues(alpha: enabled ? 0.08 : 0.03)
+                        : Color(0xFF2E1065)
+                            .withValues(alpha: enabled ? 0.06 : 0.03),
+                  ),
+                  child: Icon(icon, size: 22, color: textColor),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: textColor,
+                          )),
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: subtitleColor,
+                          )),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 20,
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.25)
+                        : Color(0xFF2E1065).withValues(alpha: 0.25)),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

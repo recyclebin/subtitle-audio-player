@@ -3,12 +3,85 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 
 import '../models/assessment_result.dart';
 
 enum AssessmentMode { afterSubtitle, karaoke }
+
+/// Extract raw PCM data from a WAV file, handling non-standard headers.
+/// Returns null if the file is not valid WAV/PCM.
+Uint8List? _extractPcmFromWav(Uint8List bytes) {
+  if (bytes.length < 44) return null;
+  final data = ByteData.sublistView(bytes);
+
+  // Verify RIFF header
+  if (data.getUint8(0) != 0x52 || // R
+      data.getUint8(1) != 0x49 || // I
+      data.getUint8(2) != 0x46 || // F
+      data.getUint8(3) != 0x46 || // F
+      data.getUint8(8) != 0x57 || // W
+      data.getUint8(9) != 0x41 || // A
+      data.getUint8(10) != 0x56 || // V
+      data.getUint8(11) != 0x45) {
+    // E
+    return null;
+  }
+
+  // Walk chunks to find "data"
+  var offset = 12;
+  while (offset + 8 <= bytes.length) {
+    final chunkId = String.fromCharCodes(bytes.sublist(offset, offset + 4));
+    final chunkSize = data.getUint32(offset + 4, Endian.little);
+    if (chunkId == 'data') {
+      final dataStart = offset + 8;
+      final dataEnd = (dataStart + chunkSize).clamp(0, bytes.length);
+      return bytes.sublist(dataStart, dataEnd);
+    }
+    offset += 8 + chunkSize;
+  }
+  return null;
+}
+
+/// Build a minimal 44-byte WAV header around raw 16-bit mono PCM data.
+Uint8List _buildMinimalWav(Uint8List pcm) {
+  final dataSize = pcm.length;
+  final fileSize = 36 + dataSize; // RIFF size = fileSize - 8
+  final header = ByteData(44);
+  // RIFF
+  header.setUint8(0, 0x52); // R
+  header.setUint8(1, 0x49); // I
+  header.setUint8(2, 0x46); // F
+  header.setUint8(3, 0x46); // F
+  header.setUint32(4, fileSize, Endian.little);
+  // WAVE
+  header.setUint8(8, 0x57); // W
+  header.setUint8(9, 0x41); // A
+  header.setUint8(10, 0x56); // V
+  header.setUint8(11, 0x45); // E
+  // fmt
+  header.setUint8(12, 0x66); // f
+  header.setUint8(13, 0x6D); // m
+  header.setUint8(14, 0x74); // t
+  header.setUint8(15, 0x20); // (space)
+  header.setUint32(16, 16, Endian.little); // chunk size
+  header.setUint16(20, 1, Endian.little); // PCM
+  header.setUint16(22, 1, Endian.little); // mono
+  header.setUint32(24, 16000, Endian.little); // sample rate
+  header.setUint32(28, 32000, Endian.little); // byte rate
+  header.setUint16(32, 2, Endian.little); // block align
+  header.setUint16(34, 16, Endian.little); // bits per sample
+  // data
+  header.setUint8(36, 0x64); // d
+  header.setUint8(37, 0x61); // a
+  header.setUint8(38, 0x74); // t
+  header.setUint8(39, 0x61); // a
+  header.setUint32(40, dataSize, Endian.little);
+
+  return Uint8List(44 + pcm.length)
+    ..setAll(0, header.buffer.asUint8List())
+    ..setAll(44, pcm);
+}
 
 class PronunciationService {
   static const _minAudioFileSize = 1600; // ~0.1s of 16kHz mono WAV
@@ -30,23 +103,53 @@ class PronunciationService {
     required String referenceText,
     required String language,
   }) {
-    return jsonEncode({
+    final json = jsonEncode({
       'ReferenceText': referenceText,
-      'GradingSystem': 'FivePoint',
+      'GradingSystem': 'HundredMark',
       'Granularity': 'Phoneme',
+      'Dimension': 'Comprehensive',
+      'EnableMiscue': true,
+      'PhonemeAlphabet': 'IPA',
     });
+    return base64Encode(utf8.encode(json));
   }
 
   String detectLanguage(String text) {
     if (text.isEmpty) return 'en-US';
-    final first = text.runes.first;
-    if (_inRange(first, 0x4E00, 0x9FFF) || _inRange(first, 0x3400, 0x4DBF)) {
-      return 'zh-CN';
+
+    bool hasAccented = false;
+    bool hasFrench = false;
+    bool hasPortuguese = false;
+    bool hasSpanish = false;
+
+    for (final code in text.runes) {
+      if (_inRange(code, 0x4E00, 0x9FFF) || _inRange(code, 0x3400, 0x4DBF)) {
+        return 'zh-CN';
+      }
+      if (_inRange(code, 0x3040, 0x309F) || _inRange(code, 0x30A0, 0x30FF)) {
+        return 'ja-JP';
+      }
+      if (_inRange(code, 0xAC00, 0xD7AF)) return 'ko-KR';
+
+      if (code > 0x007F) hasAccented = true;
+
+      // Spanish: ñ (U+00F1), ¿ (U+00BF), ¡ (U+00A1)
+      if (code == 0x00F1 || code == 0x00BF || code == 0x00A1) hasSpanish = true;
+      // Portuguese: ã (U+00E3), õ (U+00F5)
+      if (code == 0x00E3 || code == 0x00F5) hasPortuguese = true;
+      // French: ù (U+00F9), û (U+00FB), î (U+00EE), ï (U+00EF),
+      //         ë (U+00EB), è (U+00E8), œ (U+0153), æ (U+00E6)
+      if (code == 0x00F9 || code == 0x00FB || code == 0x00EE ||
+          code == 0x00EF || code == 0x00EB || code == 0x00E8 ||
+          code == 0x0153 || code == 0x00E6) {
+        hasFrench = true;
+      }
     }
-    if (_inRange(first, 0x3040, 0x309F) || _inRange(first, 0x30A0, 0x30FF)) {
-      return 'ja-JP';
-    }
-    if (_inRange(first, 0xAC00, 0xD7AF)) return 'ko-KR';
+
+    if (hasSpanish) return 'es-ES';
+    if (hasPortuguese) return 'pt-PT';
+    if (hasFrench) return 'fr-FR';
+    if (hasAccented) return 'fr-FR'; // accented Latin w/o stronger marker → French
     return 'en-US';
   }
 
@@ -89,35 +192,62 @@ class PronunciationService {
     final lang = language ?? detectLanguage(referenceText);
 
     try {
-      final bytes = await file.readAsBytes();
+      final wavBytes = await file.readAsBytes();
 
-      debugPrint('PronunciationService: calling Azure API (${bytes.length} bytes)');
-      final response = await http
-          .post(
-            Uri.parse('$_baseUrl?language=$lang'),
-            headers: {
-              'Ocp-Apim-Subscription-Key': subscriptionKey,
-              'Content-Type': 'audio/wav; codecs=audio/pcm; samplerate=16000',
-              'Pronunciation-Assessment':
-                  buildAssessmentConfig(referenceText: referenceText, language: lang),
-            },
-            body: bytes,
-          )
-          .timeout(const Duration(seconds: 15));
+      debugPrint('PronunciationService: WAV size: ${wavBytes.length} bytes');
 
-      debugPrint('PronunciationService: HTTP ${response.statusCode}');
-
-      if (response.statusCode != 200) {
-        throw AssessmentException('评估失败，请检查网络 (${response.statusCode})');
+      // Parse WAV to extract raw PCM (handles non-standard headers)
+      final pcmBytes = _extractPcmFromWav(wavBytes);
+      if (pcmBytes == null || pcmBytes.isEmpty) {
+        throw const AssessmentException('录音格式错误，请重试');
       }
+      debugPrint('PronunciationService: PCM size: ${pcmBytes.length} bytes, '
+          'WAV overhead: ${wavBytes.length - pcmBytes.length} bytes');
 
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      // Rebuild a clean minimal WAV so Azure always gets a well-formed RIFF
+      final cleanWav = _buildMinimalWav(pcmBytes);
+      debugPrint('PronunciationService: Clean WAV size: ${cleanWav.length} bytes');
 
-      if (json['RecognitionStatus'] == 'NoMatch') {
-        throw const AssessmentException('未识别到语音，请重试');
+      debugPrint('PronunciationService: calling Azure API');
+      final urlString = '$_baseUrl?language=$lang&format=detailed';
+      final assessmentConfig =
+          buildAssessmentConfig(referenceText: referenceText, language: lang);
+      debugPrint('PronunciationService: URL: $urlString');
+      debugPrint('PronunciationService: Assessment config: $assessmentConfig');
+      debugPrint('PronunciationService: Key prefix: ${subscriptionKey.substring(0, 8)}...');
+
+      final uri = Uri.parse(urlString);
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 15);
+      try {
+        final req = await client.postUrl(uri);
+        req.headers.set('Ocp-Apim-Subscription-Key', subscriptionKey);
+        req.headers.set('Content-Type', 'audio/wav; codecs=audio/pcm; samplerate=16000');
+        req.headers.set('Pronunciation-Assessment', assessmentConfig);
+        req.headers.set('Accept', 'application/json');
+        req.contentLength = cleanWav.length;
+        req.add(cleanWav);
+        final resp = await req.close().timeout(const Duration(seconds: 15));
+
+        final statusCode = resp.statusCode;
+        final body = await resp.transform(utf8.decoder).join();
+        debugPrint('PronunciationService: HTTP $statusCode');
+        debugPrint('PronunciationService: Response body: $body');
+
+        if (statusCode != 200) {
+          throw AssessmentException('评估失败 ($statusCode): $body');
+        }
+
+        final json = jsonDecode(body) as Map<String, dynamic>;
+
+        if (json['RecognitionStatus'] == 'NoMatch') {
+          throw const AssessmentException('未识别到语音，请重试');
+        }
+
+        return AssessmentResult.fromAzureResponse(json, referenceText, language: lang);
+      } finally {
+        client.close();
       }
-
-      return AssessmentResult.fromAzureResponse(json, referenceText);
     } on SocketException catch (e) {
       throw AssessmentException('网络连接失败 (${e.message})');
     } on TimeoutException {

@@ -2,7 +2,7 @@ import 'dart:math' show max;
 
 import 'package:flutter/material.dart';
 
-import 'pronunciation_overlay.dart';
+import 'mic_button.dart';
 
 /// 1.0 → "1"；0.75 → "0.75"。
 String formatStep(double s) {
@@ -379,14 +379,14 @@ class PlayerScreen extends StatelessWidget {
   final bool isLoopActive;
   final VoidCallback? onLoopTap;
 
-  final VoidCallback? onFileTap;
+  final VoidCallback? onMoreTap;
 
-  final int assessmentMode;
+  final bool isFollowReadMode;
+  final bool isRecording;
+  final int recordingSeconds;
+  final VoidCallback? onToggleFollowRead;
   final VoidCallback? onStartRecording;
-  final Future<void> Function()? onStopRecording;
-  final VoidCallback? onToggleAssessmentMode;
-  final VoidCallback? onOpenHistory;
-  final VoidCallback? onConfigureAzure;
+  final VoidCallback? onStopRecording;
 
   const PlayerScreen({
     super.key,
@@ -413,13 +413,13 @@ class PlayerScreen extends StatelessWidget {
     this.onRandomTap,
     required this.isLoopActive,
     this.onLoopTap,
-    this.onFileTap,
-    required this.assessmentMode,
+    this.onMoreTap,
+    this.isFollowReadMode = false,
+    this.isRecording = false,
+    this.recordingSeconds = 0,
+    this.onToggleFollowRead,
     this.onStartRecording,
     this.onStopRecording,
-    this.onToggleAssessmentMode,
-    this.onOpenHistory,
-    this.onConfigureAzure,
   });
 
   @override
@@ -497,44 +497,29 @@ class PlayerScreen extends StatelessWidget {
                             : Colors.white.withValues(alpha: 0.55),
                         borderRadius: BorderRadius.circular(28),
                       ),
-                      child: Stack(
-                        children: [
-                          Center(
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 28, vertical: 28),
-                              child: Text(
-                                shouldShowSubtitle ? currentSubtitle : '',
-                                style: TextStyle(
-                                  fontSize: 30,
-                                  height: 1.85,
-                                  fontWeight: FontWeight.w300,
-                                  letterSpacing: 0.3,
-                                  color: shouldShowSubtitle
-                                      ? (isDark
-                                          ? Colors.white.withValues(alpha: 0.92)
-                                          : const Color(0xFF1E0A3C))
-                                      : (isDark
-                                          ? Colors.white.withValues(alpha: 0.08)
-                                          : const Color(0xFF1E0A3C)
-                                              .withValues(alpha: 0.10)),
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
+                      child: Center(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 28, vertical: 28),
+                          child: Text(
+                            shouldShowSubtitle ? currentSubtitle : '',
+                            style: TextStyle(
+                              fontSize: 30,
+                              height: 1.85,
+                              fontWeight: FontWeight.w300,
+                              letterSpacing: 0.3,
+                              color: shouldShowSubtitle
+                                  ? (isDark
+                                      ? Colors.white.withValues(alpha: 0.92)
+                                      : const Color(0xFF1E0A3C))
+                                  : (isDark
+                                      ? Colors.white.withValues(alpha: 0.08)
+                                      : const Color(0xFF1E0A3C)
+                                          .withValues(alpha: 0.10)),
                             ),
+                            textAlign: TextAlign.center,
                           ),
-                          Positioned(
-                            top: 12,
-                            right: 12,
-                            child: PronunciationOverlay(
-                              isDark: isDark,
-                              isInitialized: isInitialized,
-                              isFileLoaded: isFileLoaded,
-                              onStartRecording: onStartRecording,
-                              onStopRecording: onStopRecording,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -568,22 +553,37 @@ class PlayerScreen extends StatelessWidget {
                               mainAxisAlignment:
                                   MainAxisAlignment.spaceEvenly,
                               children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 14),
+                                  child: MicButton(
+                                    isDark: isDark,
+                                    enabled: isInitialized &&
+                                        isFileLoaded &&
+                                        onStartRecording != null,
+                                    isFollowReadMode: isFollowReadMode,
+                                    isRecording: isRecording,
+                                    recordingSeconds: recordingSeconds,
+                                    onStartRecording: onStartRecording,
+                                    onStopRecording: onStopRecording,
+                                    onToggleFollowRead: onToggleFollowRead,
+                                  ),
+                                ),
                                 PlayBtn(
                                   icon: isPlaying
                                       ? Icons.pause_rounded
                                       : Icons.play_arrow_rounded,
-                                  onTap: onPlayPause,
+                                  onTap: isRecording ? null : onPlayPause,
                                   isDark: isDark,
                                   isPrimary: true,
                                 ),
                                 PlayBtn(
                                   icon: Icons.skip_previous_rounded,
-                                  onTap: onPrevious,
+                                  onTap: isRecording ? null : onPrevious,
                                   isDark: isDark,
                                 ),
                                 PlayBtn(
                                   icon: Icons.skip_next_rounded,
-                                  onTap: onNext,
+                                  onTap: isRecording ? null : onNext,
                                   isDark: isDark,
                                 ),
                               ],
@@ -632,33 +632,10 @@ class PlayerScreen extends StatelessWidget {
                                   isDark: isDark,
                                 ),
                                 ActionItem(
-                                  icon: assessmentMode == 0
-                                      ? Icons.mic_off_rounded
-                                      : Icons.mic_rounded,
-                                  label: assessmentMode == 0 ? '暂停后读' : '跟读',
-                                  isActive: assessmentMode != 0,
-                                  onTap: onToggleAssessmentMode,
-                                  isDark: isDark,
-                                ),
-                                ActionItem(
-                                  icon: Icons.history_rounded,
-                                  label: '历史',
+                                  icon: Icons.more_horiz_rounded,
+                                  label: '更多',
                                   isActive: false,
-                                  onTap: onOpenHistory,
-                                  isDark: isDark,
-                                ),
-                                ActionItem(
-                                  icon: Icons.key_rounded,
-                                  label: 'Azure',
-                                  isActive: false,
-                                  onTap: onConfigureAzure,
-                                  isDark: isDark,
-                                ),
-                                ActionItem(
-                                  icon: Icons.folder_open_rounded,
-                                  label: '文件',
-                                  isActive: false,
-                                  onTap: onFileTap,
+                                  onTap: onMoreTap,
                                   isDark: isDark,
                                 ),
                               ],
